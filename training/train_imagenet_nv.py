@@ -1,31 +1,29 @@
-import argparse, os, shutil, time, warnings
-from datetime import datetime
-from pathlib import Path
-import sys, os
-import math
+import argparse
 import collections
+import copy
 import gc
+import os
+import shutil
+import sys
+import time
+import warnings
+from datetime import datetime
 
-import torch
-from torch.autograd import Variable
-import torch.nn as nn
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.optim
 import torch.utils.data
 import torch.utils.data.distributed
 
+import dataloader
+import dist_utils
+import experimental_utils
+import resnet
 # import models
 from fp16util import *
-
-import resnet
-import copy
-
-import dataloader
-import experimental_utils
-import dist_utils
 from logger import TensorboardLogger, FileLogger
 from meter import AverageMeter, NetworkMeter, TimeMeter
+
 
 def get_parser():
     parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')

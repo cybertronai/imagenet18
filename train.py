@@ -20,82 +20,83 @@ args = parser.parse_args()
 # events: https://s3.amazonaws.com/yaroslavvb/logs/imagenet-1
 # logs: https://s3.amazonaws.com/yaroslavvb/logs/imagenet1.tar
 lr = 1.0
-scale_224 = 224/512
-scale_288 = 128/512
+scale_224 = 224 / 512
+scale_288 = 128 / 512
 one_machine = [
-  {'ep':0,  'sz':128, 'bs':512, 'trndir':'-sz/160'},
-  {'ep':(0,5),  'lr':(lr,lr*2)}, # lr warmup is better with --init-bn0
-  {'ep':5, 'lr':lr},
-  {'ep':14, 'sz':224, 'bs':224,
-                'lr':lr*scale_224},
-  {'ep':16,     'lr':lr/10*scale_224},
-  {'ep':27,     'lr':lr/100*scale_224},
-  {'ep':32, 'sz':288, 'bs':128, 'min_scale':0.5, 'rect_val':True,
-                'lr':lr/100*scale_288},
-  {'ep':(33,35),'lr':lr/1000*scale_288}
+  {'ep': 0, 'sz': 128, 'bs': 512, 'trndir': '-sz/160'},
+  {'ep': (0, 5), 'lr': (lr, lr * 2)},  # lr warmup is better with --init-bn0
+  {'ep': 5, 'lr': lr},
+  {'ep': 14, 'sz': 224, 'bs': 224,
+   'lr': lr * scale_224},
+  {'ep': 16, 'lr': lr / 10 * scale_224},
+  {'ep': 27, 'lr': lr / 100 * scale_224},
+  {'ep': 32, 'sz': 288, 'bs': 128, 'min_scale': 0.5, 'rect_val': True,
+   'lr': lr / 100 * scale_288},
+  {'ep': (33, 35), 'lr': lr / 1000 * scale_288}
 ]
 
 # 29:44 to 93.05
 # events: https://s3.amazonaws.com/yaroslavvb/logs/imagenet-4
 # logs: https://s3.amazonaws.com/yaroslavvb/logs/imagenet-4.tar
-lr = 0.50 * 4 # 4 = num tasks
-bs = [256, 224, 128] # largest batch size that fits in memory for each image size
-bs_scale = [x/bs[0] for x in bs] # scale learning rate to batch size
+lr = 0.50 * 4  # 4 = num tasks
+bs = [256, 224,
+      128]  # largest batch size that fits in memory for each image size
+bs_scale = [x / bs[0] for x in bs]  # scale learning rate to batch size
 four_machines = [
-  {'ep':0,  'sz':128, 'bs':bs[0], 'trndir':'-sz/160'}, # bs = 256 * 4 * 8 = 8192
-  {'ep':(0,6),  'lr':(lr,lr*2)}, 
-  {'ep':6,  'sz':128, 'bs':bs[0]*2, 'keep_dl':True},
-  {'ep':6,      'lr':lr*2},
-  {'ep':(11,13), 'lr':(lr*2,lr)}, # trying one cycle
-  {'ep':13, 'sz':224, 'bs':bs[1], 'trndir': '-sz/352', 'min_scale': 0.087},
-  {'ep':13,     'lr':lr*bs_scale[1]},
-  {'ep':(16,23),'lr':(lr*bs_scale[1],lr/10*bs_scale[1])},
-  {'ep':(23,28),'lr':(lr/10*bs_scale[1],lr/100*bs_scale[1])},
-  {'ep':28, 'sz':288, 'bs':bs[2], 'min_scale':0.5, 'rect_val':True},
-  {'ep':(28,30),'lr':(lr/100*bs_scale[2],lr/1000*bs_scale[2])}
+  {'ep': 0, 'sz': 128, 'bs': bs[0], 'trndir': '-sz/160'},
+  # bs = 256 * 4 * 8 = 8192
+  {'ep': (0, 6), 'lr': (lr, lr * 2)},
+  {'ep': 6, 'sz': 128, 'bs': bs[0] * 2, 'keep_dl': True},
+  {'ep': 6, 'lr': lr * 2},
+  {'ep': (11, 13), 'lr': (lr * 2, lr)},  # trying one cycle
+  {'ep': 13, 'sz': 224, 'bs': bs[1], 'trndir': '-sz/352', 'min_scale': 0.087},
+  {'ep': 13, 'lr': lr * bs_scale[1]},
+  {'ep': (16, 23), 'lr': (lr * bs_scale[1], lr / 10 * bs_scale[1])},
+  {'ep': (23, 28), 'lr': (lr / 10 * bs_scale[1], lr / 100 * bs_scale[1])},
+  {'ep': 28, 'sz': 288, 'bs': bs[2], 'min_scale': 0.5, 'rect_val': True},
+  {'ep': (28, 30), 'lr': (lr / 100 * bs_scale[2], lr / 1000 * bs_scale[2])}
 ]
-
 
 # 19:04 to 93.0
 # events: https://s3.amazonaws.com/yaroslavvb/logs/imagenet-16.02.8
 # logs: https://s3.amazonaws.com/yaroslavvb/logs/imagenet-8.tar 
 lr = 0.235 * 8
-scale_224 = 224/128
+scale_224 = 224 / 128
 eight_machines = [
-  {'ep':0,  'sz':128, 'bs':128, 'trndir':'-sz/160'},
-  {'ep':(0,6),  'lr':(lr,lr*2)},
-  {'ep':6,            'bs':256, 'keep_dl':True,
-                'lr':lr*2},
-  {'ep':(11,14),'lr':(lr*2,lr)}, # trying one cycle
-  {'ep':14, 'sz':224, 'bs':128, 'trndir':'-sz/352', 'min_scale':0.087,
-                'lr':lr},
-  {'ep':17,           'bs':224, 'keep_dl':True},
-  {'ep':(17,23),'lr':(lr,lr/10*scale_224)},
-  {'ep':(23,29),'lr':(lr/10*scale_224,lr/100*scale_224)},
-  {'ep':29, 'sz':288, 'bs':128, 'min_scale':0.5, 'rect_val':True},
-  {'ep':(29,35),'lr':(lr/100,lr/1000)}
+  {'ep': 0, 'sz': 128, 'bs': 128, 'trndir': '-sz/160'},
+  {'ep': (0, 6), 'lr': (lr, lr * 2)},
+  {'ep': 6, 'bs': 256, 'keep_dl': True,
+   'lr': lr * 2},
+  {'ep': (11, 14), 'lr': (lr * 2, lr)},  # trying one cycle
+  {'ep': 14, 'sz': 224, 'bs': 128, 'trndir': '-sz/352', 'min_scale': 0.087,
+   'lr': lr},
+  {'ep': 17, 'bs': 224, 'keep_dl': True},
+  {'ep': (17, 23), 'lr': (lr, lr / 10 * scale_224)},
+  {'ep': (23, 29), 'lr': (lr / 10 * scale_224, lr / 100 * scale_224)},
+  {'ep': 29, 'sz': 288, 'bs': 128, 'min_scale': 0.5, 'rect_val': True},
+  {'ep': (29, 35), 'lr': (lr / 100, lr / 1000)}
 ]
 
 # 16:08 to 93.04 (after prewarming)
 # events: https://s3.amazonaws.com/yaroslavvb/logs/imagenet-16.02.thu16
 # logs: https://s3.amazonaws.com/yaroslavvb/logs/logs/imagenet-16.cmd.tar
-lr = 0.235 * 8 # 
+lr = 0.235 * 8  #
 bs = 64
 sixteen_machines = [
-    {'ep':0,  'sz':128, 'bs':64, 'trndir':'-sz/160'},
-    {'ep':(0,6),  'lr':(lr,lr*2)},
-    {'ep':6,            'bs':128, 'keep_dl':True},
-    {'ep':6,      'lr':lr*2},
-    {'ep':16, 'sz':224,'bs':64}, # todo: increase this bs
-    {'ep':16,      'lr':lr},
-    {'ep':19,           'bs':192, 'keep_dl':True},
-    {'ep':19,     'lr':2*lr/(10/1.5)},
-    {'ep':31,     'lr':2*lr/(100/1.5)},
-    {'ep':37, 'sz':288, 'bs':128, 'min_scale':0.5, 'rect_val':True},
-    {'ep':37,     'lr':2*lr/100},
-    {'ep':(38,50),'lr':2*lr/1000}
+  {'ep': 0, 'sz': 128, 'bs': 64, 'trndir': '-sz/160'},
+  {'ep': (0, 6), 'lr': (lr, lr * 2)},
+  {'ep': 6, 'bs': 128, 'keep_dl': True},
+  {'ep': 6, 'lr': lr * 2},
+  {'ep': 16, 'sz': 224, 'bs': 64},  # todo: increase this bs
+  {'ep': 16, 'lr': lr},
+  {'ep': 19, 'bs': 192, 'keep_dl': True},
+  {'ep': 19, 'lr': 2 * lr / (10 / 1.5)},
+  {'ep': 31, 'lr': 2 * lr / (100 / 1.5)},
+  {'ep': 37, 'sz': 288, 'bs': 128, 'min_scale': 0.5, 'rect_val': True},
+  {'ep': 37, 'lr': 2 * lr / 100},
+  {'ep': (38, 50), 'lr': 2 * lr / 1000}
 ]
-  
+
 schedules = {1: one_machine,
              4: four_machines,
              8: eight_machines,
@@ -189,7 +190,7 @@ def main():
     dist_params = f'--nproc_per_node=8 --nnodes={args.machines} --node_rank={i} --master_addr={job.tasks[0].ip} --master_port={6006}'
     cmd = f'{nccl_params} python -m torch.distributed.launch {dist_params} training/train_imagenet_nv.py {training_params}'
     task.run(f'echo {cmd} > {job.logdir}/task-{i}.cmd')  # save command-line
-    task.run(cmd, async=True)
+    task.run(cmd, non_blocking=True)
 
   print(f"Logging to {job.logdir}")
 

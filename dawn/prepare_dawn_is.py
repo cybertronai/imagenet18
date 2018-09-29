@@ -76,7 +76,7 @@ def main():
   events_dict=get_events('/tmp/events', 'step')
   
   # build step->time dict for eval events
-  lr = events_dict['sizes/image']
+  lr = events_dict['losses/test1']
   for step in lr:
     print('{"image_size": '+str(lr[step])+', "example": '+str(step)+"},")
 
