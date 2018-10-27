@@ -5,3 +5,5 @@ paramiko
 portpicker
 tensorflow
 tzlocal
+tqdm
+tensorboardX
