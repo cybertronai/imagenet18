@@ -1,4 +1,4 @@
-Code to reproduce ImageNet in 18 minutes, by Andrew Shaw and Yaroslav Bulatov (also thanks to Jeremy Howard).
+Code to reproduce ImageNet in 18 minutes, by Andrew Shaw, Yaroslav Bulatov, and Jeremy Howard. High-level overview of techniques used is [here](http://fast.ai/2018/08/10/fastai-diu-imagenet/)
 
 
 Pre-requisites: Python 3.6 or higher
@@ -18,6 +18,9 @@ python train.py --machines=4
 python train.py --machines=8
 python train.py --machines=16
 ```
+
+Your AWS account needs to have high enough limit in order to reserve this number of p3.16xlarge instances. The code will set up necessary infrastructure like EFS, VPC, subnets, keypairs and placement groups. Therefore permissions for these those resources are needed.
+
 
 # Checking progress
 
@@ -49,3 +52,6 @@ Test:  [21][7/7]        Time 0.105 (0.432)      Loss 1.4089 (1.3346)    Acc@1 67
 ```
 
 The last number indicates that at epoch 21 the run got 67.462 top-1 test accuracy and 88.124 top-5 test accuracy.
+
+# Other notes
+If you run locally, you may need to download imagenet yourself, follow instructions here -- https://github.com/diux-dev/cluster/tree/master/pytorch#data-preparation

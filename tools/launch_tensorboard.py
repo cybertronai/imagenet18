@@ -9,6 +9,7 @@ ncluster.use_aws()
 
 task = ncluster.make_task('tensorboard',
                           instance_type='r5.large',
+                          run_name='tensorboard',
                           image_name='Deep Learning AMI (Ubuntu) Version 13.0')
 task.run('source activate tensorflow_p36')
 task.run(f'tensorboard --logdir={task.logdir}/..', non_blocking=True)
