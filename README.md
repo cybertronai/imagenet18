@@ -6,7 +6,6 @@ Pre-requisites: Python 3.6 or higher
 ```
 pip install -r requirements.txt
 aws configure  (or set your AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_DEFAULT_REGION)
-python train.py  # pre-warming
 python train.py 
 ```
 
