@@ -7,3 +7,4 @@ tensorflow
 tzlocal
 tqdm
 tensorboardX
+torch

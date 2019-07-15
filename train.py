@@ -8,7 +8,6 @@ IMAGE_NAME = 'pytorch.imagenet.source.v7'
 INSTANCE_TYPE = 'p3.16xlarge'
 NUM_GPUS = 8
 
-ncluster.set_backend('aws')
 parser = argparse.ArgumentParser()
 parser.add_argument('--name', type=str, default='imagenet',
                     help="name of the current run, used for machine naming and tensorboard visualization")
