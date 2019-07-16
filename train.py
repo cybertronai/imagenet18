@@ -35,6 +35,26 @@ one_machine = [
   {'ep': (33, 35), 'lr': lr / 1000 * scale_288}
 ]
 
+
+lr = 0.50 * 4  # 4 = num tasks
+bs = [256, 224,
+      128]  # largest batch size that fits in memory for each image size
+bs_scale = [x / bs[0] for x in bs]  # scale learning rate to batch size
+four_machines = [
+  {'ep': 0, 'sz': 128, 'bs': bs[0], 'trndir': '-sz/160'},
+  # bs = 256 * 4 * 8 = 8192
+  {'ep': (0, 6), 'lr': (lr, lr * 2)},
+  {'ep': 6, 'sz': 128, 'bs': bs[0] * 2, 'keep_dl': True},
+  {'ep': 6, 'lr': lr * 2},
+  {'ep': (11, 13), 'lr': (lr * 2, lr)},  # trying one cycle
+  {'ep': 13, 'sz': 224, 'bs': bs[1], 'trndir': '-sz/352', 'min_scale': 0.087},
+  {'ep': 13, 'lr': lr * bs_scale[1]},
+  {'ep': (16, 23), 'lr': (lr * bs_scale[1], lr / 10 * bs_scale[1])},
+  {'ep': (23, 28), 'lr': (lr / 10 * bs_scale[1], lr / 100 * bs_scale[1])},
+  {'ep': 28, 'sz': 288, 'bs': bs[2], 'min_scale': 0.5, 'rect_val': True},
+  {'ep': (28, 30), 'lr': (lr / 100 * bs_scale[2], lr / 1000 * bs_scale[2])}
+]
+
 # 29:44 to 93.05
 # events: https://s3.amazonaws.com/yaroslavvb/logs/imagenet-4
 # logs: https://s3.amazonaws.com/yaroslavvb/logs/imagenet-4.tar
