@@ -1,4 +1,5 @@
 from tensorboardX import SummaryWriter
+import os
 import torch
 import time
 import wandb
@@ -11,6 +12,7 @@ class TensorboardLogger:
     if is_master:
       self.writer = SummaryWriter(self.output_dir)
       wandb.init(project=project, name=name)
+      wandb.config['gpus'] = int(os.environ.get('WORLD_SIZE', 1))
 
     else: self.writer = NoOp()
     self.log('first', time.time())

@@ -4,6 +4,7 @@ import argparse
 import ncluster
 import os
 
+# todo(y): change to AMI owned by me ie, pytorch.imagenet.source.v7-copy
 IMAGE_NAME = 'pytorch.imagenet.source.v7'
 INSTANCE_TYPE = 'p3.16xlarge'
 NUM_GPUS = 8
@@ -165,10 +166,11 @@ def main():
                           image_name=IMAGE_NAME,
                           instance_type=INSTANCE_TYPE)
 
-  job.upload('setup.sh')
-  job.upload('worker_requirements.txt')  # todo(y): replace with rsync
+  job.rsync('.')
+  #  job.upload('setup.sh')
+  #  job.upload('worker_requirements.txt')  # todo(y): replace with rsync
   job.run('bash setup.sh')
-  job.upload('training')
+  #  job.upload('training')
   job.run(f'source activate pytorch_source')
 
   nccl_params = get_nccl_params(args.machines, NUM_GPUS)
@@ -178,6 +180,7 @@ def main():
     '~/data/imagenet',
     '--fp16',
     '--logdir', job.logdir,
+    '--name', args.name,
     '--distributed',
     '--init-bn0',
     '--no-bn-wd',

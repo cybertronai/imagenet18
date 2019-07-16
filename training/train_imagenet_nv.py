@@ -65,6 +65,8 @@ def get_parser():
     parser.add_argument('--auto-shutdown-failure-delay-mins', default=60, type=int,
                         help='how long to wait before shutting down on error')
 
+    parser.add_argument('--name', type=str, default='imagenet',
+                        help="name of the current run, used for machine naming and tensorboard visualization")
     parser.add_argument('--short-epoch', action='store_true',
                         help='make epochs short (for debugging)')
     return parser
@@ -76,7 +78,7 @@ args = get_parser().parse_args()
 # Only want master rank logging to tensorboard
 is_master = (not args.distributed) or (dist_utils.env_rank() == 0)
 is_rank0 = args.local_rank == 0
-tb = TensorboardLogger(args.logdir, is_master=is_master)
+tb = TensorboardLogger(args.logdir, is_master=is_master, name=args.name)
 log = FileLogger(args.logdir, is_master=is_master, is_rank0=is_rank0)
 
 
@@ -132,7 +134,7 @@ def main():
     scheduler = Scheduler(optimizer, [copy.deepcopy(p) for p in phases if 'lr' in p])
 
     start_time = datetime.now()  # Loading start to after everything is loaded
-    if args.evaluate:  return validate(dm.val_dl, model, criterion, 0, start_time)
+    if args.evaluate: return validate(dm.val_dl, model, criterion, 0, start_time)
 
     if args.distributed:
         log.console('Syncing machines before training')
