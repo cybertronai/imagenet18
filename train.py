@@ -163,8 +163,11 @@ def main():
                           run_name=f"{args.name}-{args.machines}",
                           num_tasks=args.machines,
                           image_name=IMAGE_NAME,
-                          instance_type=INSTANCE_TYPE,
-                          install_script=open('setup.sh').read())
+                          instance_type=INSTANCE_TYPE)
+
+  job.upload('setup.sh')
+  job.upload('worker_requirements.txt')  # todo(y): replace with rsync
+  job.run('bash setup.sh')
   job.upload('training')
   job.run(f'source activate pytorch_source')
 

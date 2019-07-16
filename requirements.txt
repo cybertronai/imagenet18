@@ -8,3 +8,4 @@ tzlocal
 tqdm
 tensorboardX
 torch
+wandb

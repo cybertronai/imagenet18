@@ -28,3 +28,6 @@ sudo sysctl -w net.core.rmem_default=16777216
 sudo sysctl -w net.core.wmem_default=16777216
 sudo sysctl -w net.ipv4.tcp_mem='16777216 16777216 16777216'
 sudo sysctl -w net.ipv4.route.flush=1
+
+pip install -r worker_requirements.txt
+
