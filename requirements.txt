@@ -9,3 +9,4 @@ tqdm
 tensorboardX
 torch
 wandb
+ec2-metadata

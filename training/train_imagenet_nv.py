@@ -20,9 +20,17 @@ import dist_utils
 import experimental_utils
 import resnet
 # import models
+
+import sys  # add path to util which is one level above
+module_path = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.abspath(f'{module_path}/..'))
+
+import util
 from fp16util import *
 from logger import TensorboardLogger, FileLogger
 from meter import AverageMeter, NetworkMeter, TimeMeter
+
+import wandb
 
 
 def get_parser():
@@ -69,6 +77,7 @@ def get_parser():
                         help="name of the current run, used for machine naming and tensorboard visualization")
     parser.add_argument('--short-epoch', action='store_true',
                         help='make epochs short (for debugging)')
+    parser.add_argument('--internal_config_fn', type=str, default='config_dict', help='location of filename with extra info to log')
     return parser
 
 
@@ -78,7 +87,16 @@ args = get_parser().parse_args()
 # Only want master rank logging to tensorboard
 is_master = (not args.distributed) or (dist_utils.env_rank() == 0)
 is_rank0 = args.local_rank == 0
-tb = TensorboardLogger(args.logdir, is_master=is_master, name=args.name)
+
+if is_master:
+    wandb.init(project='imagenet18', name=args.name)
+    wandb.config['gpus'] = int(os.environ.get('WORLD_SIZE', 1))
+    config = util.text_unpickle(open(args.internal_config_fn).read())
+    config['worker_conda'] = util.ossystem('echo ${CONDA_PREFIX:-"$(dirname $(which conda))/../"}')
+    wandb.config.update(config)
+    util.log_environment()
+
+tb = TensorboardLogger(args.logdir, is_master=is_master)
 log = FileLogger(args.logdir, is_master=is_master, is_rank0=is_rank0)
 
 

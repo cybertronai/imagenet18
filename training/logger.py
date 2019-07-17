@@ -5,14 +5,12 @@ import time
 import wandb
   
 class TensorboardLogger:
-  def __init__(self, output_dir, project='imagenet18', name='first_run', is_master=False):
+  def __init__(self, output_dir, is_master=False):
     self.output_dir = output_dir
     self.current_step = 0
     self.is_master = is_master
     if is_master:
       self.writer = SummaryWriter(self.output_dir)
-      wandb.init(project=project, name=name)
-      wandb.config['gpus'] = int(os.environ.get('WORLD_SIZE', 1))
 
     else: self.writer = NoOp()
     self.log('first', time.time())
