@@ -27,24 +27,23 @@
 # snapshot = ec2.create_snapshot(Description=f'{u.get_name(vol)} snapshot',
 # VolumeId=vol.id,)
 
-import os
-from ncluster import aws_util as u
-
 import argparse
+
+from ncluster import aws_util as u
 
 parser = argparse.ArgumentParser(description='launch')
 parser.add_argument('--replicas', type=int, default=8)
 parser.add_argument('--snapshot', type=str, default='imagenet18')
-parser.add_argument('--snapshot-account', type=str, default='316880547378',
+parser.add_argument('--snapshot_account', type=str, default='316880547378',
                     help='account id hosting this snapshot')
-parser.add_argument('--volume-offset', type=int, default=0, help='start numbering with this value')
-#parser.add_argument('--zone', type=str, default='us-east-1b', help='zone to use for snapshots')
+parser.add_argument('--volume_offset', type=int, default=0, help='start numbering with this value')
 parser.add_argument('--size_gb', type=int, default=0, help="size in GBs")
+parser.add_argument('--delete', action='store_true', help="delete volumes instead of creating")
 
 args = parser.parse_args()
 
 
-def create_tags(name):
+def create_volume_tags(name):
     return [{
         'ResourceType': 'volume',
         'Tags': [{
@@ -53,6 +52,8 @@ def create_tags(name):
         }]
     }]
 
+
+# TODO: switch to snap-03e6fc1ab6d2da3c5
 
 def main():
     ec2 = u.get_ec2_resource()
@@ -68,16 +69,33 @@ def main():
     if not args.size_gb:
         args.size_gb = snap.volume_size
 
-    print(f"Making {args.replicas} {args.size_gb} GB replicas in {zone}")
+    # list existing volumes
+    vols = {}
+    for vol in ec2.volumes.all():
+        vols[u.get_name(vol)] = vol
+
+    print(f"{'Deleting' if args.delete else 'Making'} {args.replicas} {args.size_gb} GB replicas in {zone}")
 
     for i in range(args.volume_offset, args.replicas + args.volume_offset):
-        vol_name = 'imagenet_%02d' % (i)
+        vol_name = f'imagenet_{zone[-2:]}_{i:02d}'
+        if args.delete:
+            print(f"Deleting {vol_name}")
+            if vol_name not in vols:
+                print("    Not found")
+                continue
+            else:
+                vols[vol_name].delete()
+            continue
 
-        vol = ec2.create_volume(Size=args.size_gb,
-                                TagSpecifications=create_tags(vol_name),
-                                AvailabilityZone=zone,
-                                SnapshotId=snap.id)
-        print(f"Creating {vol_name} {vol.id}")
+        if vol_name in vols:
+            print(f"{vol_name} exists, skipping")
+        else:
+            vol = ec2.create_volume(Size=args.size_gb,
+                                    TagSpecifications=create_volume_tags(vol_name),
+                                    AvailabilityZone=zone,
+                                    SnapshotId=snap.id,
+                                    Iops=11500, VolumeType='io1')
+            print(f"Creating {vol_name} {vol.id}")
 
 
 if __name__ == '__main__':

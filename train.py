@@ -25,6 +25,8 @@ parser.add_argument('--mount_imagenet', type=int, default=0,
                     help="if set, mount imagenet disk rather than taking data from local image")
 parser.add_argument('--internal_config_fn', type=str, default='config_dict',
                     help='location of filename with extra info to log')
+parser.add_argument('--offset', type=int, default=0,
+                    help='offset for imagenet ebs numbering')
 args = parser.parse_args()
 
 # 109:12 to 93.00
@@ -194,97 +196,50 @@ def create_volume_tags(name):
     }]
 
 
-# default_device_name = None
-# default_device_name = '/dev/nvme1n1'
-default_device_name = '/dev/xvdf'
-IMAGENET_DATA_SIZE = 503
-
-
-# def mount_imagenet(task, snapshot_id='snap-08688d235aae5155e'):
-#     """Mount snapshot under /data for given task. Use io1 type since gp2 adds extra 20 mins to startup."""
-#
-#     name = task.name
-#     if name in volumes[task.zone]:
-#       return
-#     # mounts given snapshot under /data
-#     global default_device_name
-#     ec2 = u.get_ec2_resource()
-#     vol = ec2.create_volume(Size=IMAGENET_DATA_SIZE, TagSpecifications=create_volume_tags(name),
-#                             AvailabilityZone=task.zone,
-#                             SnapshotId=snapshot_id,
-#                             Iops=11500, VolumeType='io1')
-#
-#     task.instance.attach_volume(Device=default_device_name, VolumeId=vol.id)
-#
-#     # use this logic when device name changes
-#     if default_device_name is None:
-#         task.run('lsblk')
-#         for line in task.output.split('\n'):
-#             print(line)
-#             if f'{IMAGENET_DATA_SIZE}G' in line:
-#                 default_device_name = '/dev/' + line.split()[0].strip()
-#
-#     task.run(f'sudo mkdir -p /data && sudo chown `whoami` /data && sudo mount {default_device_name} /data')
-
-
 DEFAULT_UNIX_DEVICE = '/dev/xvdf'
 ATTACH_WAIT_INTERVAL_SEC = 5
 
 
-def mount_volume_data(job: ncluster.aws_backend.Job, tag, offset=0, unix_device=DEFAULT_UNIX_DEVICE):
+def mount_imagenet(job: ncluster.aws_backend.Job):
+    """Attaches EBS disks with imagenet data to each task of the job."""
+
+    zone = u.get_zone()
+    vols = {}
+    ec2 = u.get_ec2_resource()
+    for vol in ec2.volumes.all():
+        vols[u.get_name(vol)] = vol
+
+    attach_attempted = False
     for i, t in enumerate(job.tasks):
-        attach_instance_ebs(t.instance, '%s_%02d' % (tag, i + offset))
-    job.run('sudo mkdir /data -p && sudo chown `whomai` && sudo mount {unix_device} /data')
+        vol_name = f'imagenet_{zone[-2:]}_{i:02d}'
+        assert vol_name in vols, f"Volume {vol_name} not found, make sure to run replicate_imagenet.py"
+        vol = vols[vol_name]
+        print(f"Attaching {vol_name} to {t.name}")
+        if vol.attachments and vol.attachments[0]['InstanceId'] == t.instance.id:
+            print(f"{vol_name} already attached")
+            continue
+        else:
+            vol.attach_to_instance(InstanceId=t.instance.id, Device=DEFAULT_UNIX_DEVICE)
+            attach_attempted = True
+
+    if attach_attempted:
+        time.sleep(2)  # wait for attachment to succeed
+        i = 0
+        vol_name = f'imagenet_{zone[-2:]}_{i:02d}'
+        vol = vols[vol_name]
+        vol.reload()
+        assert vol.attachments[0]['InstanceId'] == job.tasks[0].instance.id
+
+    job.tasks[0].run('df')
+    if DEFAULT_UNIX_DEVICE not in job.tasks[0].output:
+        job.run(f'sudo mkdir -p /data && sudo chown `whoami` /data && sudo mount {DEFAULT_UNIX_DEVICE} /data')
     while True:
         job.tasks[0].run('df')
         status = job.tasks[0].output
-        if unix_device in status:
+        if DEFAULT_UNIX_DEVICE in status:
             print('Volume already mounted, ignoring')
             break
         time.sleep(ATTACH_WAIT_INTERVAL_SEC)
-
-
-def attach_instance_ebs(aws_instance, tag, unix_device=DEFAULT_UNIX_DEVICE):
-    """Attaches volume to instance. Will try to detach volume if it's already mounted somewhere else. Will retry indefinitely on error."""
-
-    ec2 = u.get_ec2_resource()
-    v = list(ec2.volumes.filter(Filters=[{'Name': 'tag:Name', 'Values': [tag]},
-                                         {"Name": "availability-zone", 'Values': [u.get_zone()]}]))
-    assert v, f"Volume {tag} not found."
-    v = v[0]
-    volume_name = u.get_name(v)
-    already_attached = v.attachments and v.attachments[0]['InstanceId'] == aws_instance.id
-    instance_name = u.get_name(aws_instance)
-    # TODO: still have edge case when it doesn't report as already attached
-    # and keeps trying to attach to an instance that has data mounted already
-    if already_attached:
-        print(f'volume {volume_name} ({v.id}) already attached to {instance_name}')
-        return
-    while v.state != 'available':
-        response = v.detach_from_instance()
-        instance_id = v.attachments[0]['InstanceId']
-        instance_name = u.get_name(instance_id)
-        print(f'Volume {tag} is attached to {instance_name}, detaching, response={response.get("State", "none")}')
-        time.sleep(ATTACH_WAIT_INTERVAL_SEC)
-        v.reload()
-    while True:
-        try:
-            response = v.attach_to_instance(InstanceId=aws_instance.id,
-                                            Device=unix_device)
-            print(f'Attaching {volume_name} to {instance_name}: response={response.get("State", "none")}')
-
-        # sometimes have unrecoverable failure on brand new instance with
-        # possibly because of https://forums.aws.amazon.com/thread.jspa?threadID=66192
-        #    Error attaching volume: (An error occurred (InvalidParameterValue) when calling the AttachVolume operation: Invalid value '/dev/xvdf' for unixDevice. Attachment point /dev/xvdf is already in use). Retrying in 5 An error occurred (InvalidParameterValue) when calling the AttachVolume operation: Invalid value '/dev/xvdf' for unixDevice. Attachment point /dev/xvdf is already in use
-
-        except Exception as e:
-            print(f"Failed attaching ({v.id}) to ({aws_instance.id})")
-            print(f'Error attaching volume: ({e}). Retrying in {ATTACH_WAIT_INTERVAL_SEC}', e)
-            time.sleep(ATTACH_WAIT_INTERVAL_SEC)
-            continue
-        else:
-            print('Attachment successful')
-            break
 
 
 def main():
@@ -304,10 +259,7 @@ def main():
                             image_name=IMAGE_NAME,
                             instance_type=INSTANCE_TYPE)
 
-    config = {'num_tasks': args.machines,
-              'image_name': IMAGE_NAME,
-              'instance_type': INSTANCE_TYPE,
-              'job_name': args.name}
+    config = dict(num_tasks=args.machines, image_name=IMAGE_NAME, instance_type=INSTANCE_TYPE, job_name=args.name)
     for key in os.environ:
         if re.match(r"^NCLUSTER", key):
             config['env_'+key] = os.getenv(key)
@@ -327,8 +279,7 @@ def main():
 
     if args.mount_imagenet:
         assert u.get_zone(), "Must specify zone when reusing EBS volumes"
-        suffix = u.get_zone()[-2:]
-        mount_volume_data(job, f'imagenet-{suffix}')
+        mount_imagenet(job)
 
     job.run('rm *.py')  # remove files backed into image from before refactoring
     job.rsync('.')
