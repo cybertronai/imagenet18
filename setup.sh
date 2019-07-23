@@ -7,11 +7,11 @@
 # - pip install tensorboardX
 # - version of PyTorch built from master around August
 
-source activate pytorch_source
+# source activate pytorch_source
 
 # index file used to speed up evaluation
 pushd ~/data/imagenet
-wget --no-clobber https://s3.amazonaws.com/yaroslavvb/sorted_idxar.p
+wget --no-clobber https://s3.amazonaws.com/yaroslavvb2/data/sorted_idxar.p
 popd
 
 pip uninstall pillow -y

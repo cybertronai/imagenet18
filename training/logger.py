@@ -76,6 +76,8 @@ class FileLogger:
     logger.setLevel(logging.DEBUG)
     formatter = logging.Formatter('%(message)s')
 
+    time_formatter = logging.Formatter('%(asctime)s - %(filename)s:%(lineno)d - %(message)s')
+
     if log_to_file:
       vlog = logging.FileHandler(output_dir+'/verbose.log')
       vlog.setLevel(logging.INFO)
@@ -87,14 +89,13 @@ class FileLogger:
       eventlog.setFormatter(formatter)
       logger.addHandler(eventlog)
 
-      time_formatter = logging.Formatter('%(asctime)s - %(filename)s:%(lineno)d - %(message)s')
       debuglog = logging.FileHandler(output_dir+'/debug.log')
       debuglog.setLevel(logging.DEBUG)
       debuglog.setFormatter(time_formatter)
       logger.addHandler(debuglog)
       
     console = logging.StreamHandler()
-    console.setFormatter(formatter)
+    console.setFormatter(time_formatter)
     console.setLevel(logging.DEBUG)
     logger.addHandler(console)
     return logger

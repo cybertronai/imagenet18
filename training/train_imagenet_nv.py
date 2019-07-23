@@ -470,6 +470,7 @@ def listify(p=None, q=None):
     if len(p) == 1:  p = p * n
     return p
 
+# todo(y): pdb debug on error
 
 if __name__ == '__main__':
     try:
@@ -482,6 +483,7 @@ if __name__ == '__main__':
         import traceback
 
         traceback.print_tb(exc_traceback, file=sys.stdout)
+        print(str(e))
         log.event(e)
         # in case of exception, wait 2 hours before shutting down
         if not args.skip_auto_shutdown:  os.system(f'sudo shutdown -h -P +{args.auto_shutdown_failure_delay_mins}')

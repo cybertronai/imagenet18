@@ -33,9 +33,11 @@ from ncluster import aws_util as u
 
 parser = argparse.ArgumentParser(description='launch')
 parser.add_argument('--replicas', type=int, default=8)
-parser.add_argument('--snapshot', type=str, default='imagenet18')
-parser.add_argument('--snapshot_account', type=str, default='316880547378',
-                    help='account id hosting this snapshot')
+#parser.add_argument('--snapshot', type=str, default='imagenet18')
+parser.add_argument('--snapshot', type=str, default='imagenet18-backup')
+#parser.add_argument('--snapshot_account', type=str, default='316880547378',
+#                    help='account id hosting this snapshot')
+
 parser.add_argument('--volume_offset', type=int, default=0, help='start numbering with this value')
 parser.add_argument('--size_gb', type=int, default=0, help="size in GBs")
 parser.add_argument('--delete', action='store_true', help="delete volumes instead of creating")
@@ -60,9 +62,10 @@ def main():
     zone = u.get_zone()
 
     # use filtering by description since Name is not public
-    snapshots = list(ec2.snapshots.filter(Filters=[{'Name': 'description', 'Values': [args.snapshot]},
-                                                   {'Name': 'owner-id', 'Values': [args.snapshot_account]}]))
-
+    # snapshots = list(ec2.snapshots.filter(Filters=[{'Name': 'description', 'Values': [args.snapshot]},
+    #                                                {'Name': 'owner-id', 'Values': [args.snapshot_account]}]))
+    snapshots = list(ec2.snapshots.filter(Filters=[{'Name': 'description', 'Values': [args.snapshot]}]))
+                     
     assert len(snapshots) > 0, f"no snapshot matching {args.snapshot}"
     assert len(snapshots) < 2, f"multiple snapshots matching {args.snapshot}"
     snap = snapshots[0]

@@ -1,3 +1,4 @@
 torch
 wandb
 ec2-metadata
+tensorboardX

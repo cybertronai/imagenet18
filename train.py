@@ -12,21 +12,26 @@ from ncluster import aws_util as u
 # todo(y): change to AMI owned by me ie, pytorch.imagenet.source.v7-copy
 import util
 
-IMAGE_NAME = 'pytorch.imagenet.source.v7'
-INSTANCE_TYPE = 'p3.16xlarge'
+# IMAGE_NAME = 'pytorch.imagenet.source.v7'
 NUM_GPUS = 8
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--name', type=str, default='imagenet',
                     help="name of the current run, used for machine naming and tensorboard visualization")
-parser.add_argument('--machines', type=int, default=16,
+parser.add_argument('--machines', type=int, default=1,
                     help="how many machines to use")
 parser.add_argument('--mount_imagenet', type=int, default=0,
                     help="if set, mount imagenet disk rather than taking data from local image")
+parser.add_argument('--vmtouch', type=int, default=0,
+                    help="lock all examples into physical memory")
+#vmtouch -dl /var/www/htdocs/critical/
 parser.add_argument('--internal_config_fn', type=str, default='config_dict',
                     help='location of filename with extra info to log')
 parser.add_argument('--offset', type=int, default=0,
                     help='offset for imagenet ebs numbering')
+parser.add_argument('--image_name', type=str, default='Deep Learning AMI (Ubuntu) Version 23.0', help="Image to use for this run")
+parser.add_argument('--instance_type', type=str, default='p3.16xlarge', help="Image to use for this run")
+parser.add_argument('--conda_env', type=str, default='pytorch_p36', help="name of conda env")
 args = parser.parse_args()
 
 # 109:12 to 93.00
@@ -243,8 +248,9 @@ def mount_imagenet(job: ncluster.aws_backend.Job):
 
 
 def main():
-    supported_regions = ['us-west-2', 'us-east-1', 'us-east-2']
-    assert ncluster.get_region() in supported_regions, f"required AMI {IMAGE_NAME} has only been made available in regions {supported_regions}, but your current region is {ncluster.get_region()} (set $AWS_DEFAULT_REGION)"
+    if args.image_name == 'pytorch.imagenet.source.v7':
+        supported_regions = ['us-west-2', 'us-east-1', 'us-east-2']
+        assert ncluster.get_region() in supported_regions, f"required AMI {args.image_name} has only been made available in regions {supported_regions}, but your current region is {ncluster.get_region()} (set $AWS_DEFAULT_REGION)"
     assert args.machines in schedules, f"{args.machines} not supported, only support {schedules.keys()}"
 
     if args.mount_imagenet:
@@ -256,10 +262,10 @@ def main():
     job = ncluster.make_job(name=args.name,
                             run_name=f"{args.name}-{args.machines}",
                             num_tasks=args.machines,
-                            image_name=IMAGE_NAME,
-                            instance_type=INSTANCE_TYPE)
+                            image_name=args.image_name,
+                            instance_type=args.instance_type)
 
-    config = dict(num_tasks=args.machines, image_name=IMAGE_NAME, instance_type=INSTANCE_TYPE, job_name=args.name)
+    config = {}
     for key in os.environ:
         if re.match(r"^NCLUSTER", key):
             config['env_'+key] = os.getenv(key)
@@ -273,6 +279,7 @@ def main():
     config['cmd'] = ' '.join(sys.argv)
     config['launcher_conda'] = util.ossystem('echo ${CONDA_PREFIX:-"$(dirname $(which conda))/../"}')
     config['launcher_cmd'] = 'python '+' '.join(sys.argv)
+    config['logdir'] = job.logdir
 
     pickled_config = util.text_pickle(config)
     job.tasks[0].write(args.internal_config_fn, pickled_config)
@@ -281,13 +288,14 @@ def main():
         assert u.get_zone(), "Must specify zone when reusing EBS volumes"
         mount_imagenet(job)
 
-    job.run('rm *.py')  # remove files backed into image from before refactoring
+    job.run('rm -f *.py')  # remove files backed into imagenet18 release image
     job.rsync('.')
     #  job.upload('setup.sh')
     #  job.upload('worker_requirements.txt')  # todo(y): replace with rsync
+    job.run(f'source activate {args.conda_env}')
     job.run('bash setup.sh')
-    #  job.upload('training')
-    job.run(f'source activate pytorch_source')
+
+    job.run('pip install -U protobuf')
 
     nccl_params = get_nccl_params(args.machines, NUM_GPUS)
 
