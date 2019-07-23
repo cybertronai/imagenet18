@@ -145,7 +145,7 @@ def get_nccl_params(num_tasks, num_gpus):
     if num_tasks <= 1:
         return 'NCCL_DEBUG=VERSION'
     nccl_rings = get_nccl_rings(num_tasks, num_gpus)
-    return f'NCCL_RINGS="{nccl_rings}" NCCL_SINGLE_RING_THRESHOLD=10 NCCL_DEBUG=VERSION'
+    return f'NCCL_RINGS="{nccl_rings}" NCCL_SINGLE_RING_THRESHOLD=10 NCCL_DEBUG=VERSION OMP_NUM_THREADS=1 '
     # return 'NCCL_MIN_NRINGS=2 NCCL_SINGLE_RING_THRESHOLD=10 NCCL_DEBUG=VERSION'
 
 
@@ -217,7 +217,7 @@ def mount_imagenet(job: ncluster.aws_backend.Job):
     attach_attempted = False
     for i, t in enumerate(job.tasks):
         vol_name = f'imagenet_{zone[-2:]}_{i:02d}'
-        assert vol_name in vols, f"Volume {vol_name} not found, make sure to run replicate_imagenet.py"
+        assert vol_name in vols, f"Volume {vol_name} not found, set your NCLUSTER_ZONE={zone} and run replicate_imagenet.py"
         vol = vols[vol_name]
         print(f"Attaching {vol_name} to {t.name}")
         if vol.attachments and vol.attachments[0]['InstanceId'] == t.instance.id:
@@ -263,7 +263,9 @@ def main():
                             run_name=f"{args.name}-{args.machines}",
                             num_tasks=args.machines,
                             image_name=args.image_name,
-                            instance_type=args.instance_type)
+                            instance_type=args.instance_type,
+                            disk_size=200,
+                            )
 
     config = {}
     for key in os.environ:

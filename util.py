@@ -27,7 +27,7 @@ def log_environment():
     import wandb
     
     for key in os.environ:
-        if re.match(r"^NCCL|CUDA|PATH|^LD|USER|PWD", key):
+        if re.match(r"^NCCL|CUDA|PATH|^LD|USER|PWD|^OMP", key):
             wandb.config['env_'+key] = os.getenv(key)
 
     wandb.config.update(extract_ec2_metadata())
