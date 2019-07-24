@@ -26,11 +26,11 @@ def create_tags(name):
         }]
     }]
 
-vol = ec2.create_volume(Size=300, TagSpecifications=create_tags('imagenet18'), AvailabilityZone=ec2_metadata.availability_zone, VolumeType='gp2')
+vol = ec2.create_volume(Size=400, TagSpecifications=create_tags('imagenet18'), AvailabilityZone=ec2_metadata.availability_zone, VolumeType='gp2')
 vol = ec2.Volume('vol-0fd20d716517c942d')
 
 instance = ec2.Instance(ec2_metadata.instance_id)
-device_name = '/dev/xvdh'
+device_name = '/dev/xvdh'  # or /dev/nvme1n1
 instance.attach_volume(Device=device_name, VolumeId=vol.id)
 vol.reload()
 assert ec2_metadata.instance_id in str(vol.attachments)
@@ -40,7 +40,8 @@ lsblk  # get name of device (look for one with 300 size like nvme1n1, then dev n
 sudo file -s /dev/nvme1n1   
 
 sudo mkfs -t ext4 /dev/nvme1n1
-sudo mkdir /data
+sudo umount data || echo skipping
+sudo mkdir -p /data
 sudo chown `whoami` /data
 sudo mount /dev/nvme1n1 /data
 

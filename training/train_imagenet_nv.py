@@ -1,14 +1,14 @@
 import argparse
 import collections
 import copy
-import gc
 import os
 import shutil
-import sys
+import sys  # add path to util which is one level above
 import time
 import warnings
 from datetime import datetime
 
+import gc
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.optim
@@ -19,9 +19,8 @@ import dataloader
 import dist_utils
 import experimental_utils
 import resnet
-# import models
 
-import sys  # add path to util which is one level above
+# util is one level up, so import that
 module_path = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.abspath(f'{module_path}/..'))
 
@@ -92,6 +91,7 @@ if is_master:
     wandb.init(project='imagenet18', name=args.name)
     wandb.config['gpus'] = int(os.environ.get('WORLD_SIZE', 1))
     config = util.text_unpickle(open(args.internal_config_fn).read())
+    # todo(y): only do filename not abspath
     config['worker_conda'] = util.ossystem('echo ${CONDA_PREFIX:-"$(dirname $(which conda))/../"}')
     wandb.config.update(config)
     util.log_environment()
@@ -105,6 +105,8 @@ def main():
     log.console(args)
     tb.log('sizes/world', dist_utils.env_world_size())
 
+    assert os.path.exists(args.data)
+    
     # need to index validation directory before we start counting the time
     dataloader.sort_ar(args.data + '/validation')
 

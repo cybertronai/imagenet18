@@ -13,7 +13,7 @@ class TensorboardLogger:
       self.writer = SummaryWriter(self.output_dir)
 
     else: self.writer = NoOp()
-    self.log('first', time.time())
+    #    self.log('first', time.time())
 
   def log(self, tag, val):
     """Log value to tensorboard (relies on global_example_count being set properly)"""

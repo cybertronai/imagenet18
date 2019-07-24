@@ -32,7 +32,7 @@ import argparse
 from ncluster import aws_util as u
 
 parser = argparse.ArgumentParser(description='launch')
-parser.add_argument('--replicas', type=int, default=8)
+parser.add_argument('--replicas', type=int, default=1)
 #parser.add_argument('--snapshot', type=str, default='imagenet18')
 parser.add_argument('--snapshot', type=str, default='imagenet18-backup')
 #parser.add_argument('--snapshot_account', type=str, default='316880547378',

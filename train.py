@@ -145,7 +145,7 @@ def get_nccl_params(num_tasks, num_gpus):
     if num_tasks <= 1:
         return 'NCCL_DEBUG=VERSION'
     nccl_rings = get_nccl_rings(num_tasks, num_gpus)
-    return f'NCCL_RINGS="{nccl_rings}" NCCL_SINGLE_RING_THRESHOLD=10 NCCL_DEBUG=VERSION OMP_NUM_THREADS=1 '
+    return f'NCCL_RINGS="{nccl_rings}" NCCL_SINGLE_RING_THRESHOLD=10 NCCL_DEBUG=VERSION '
     # return 'NCCL_MIN_NRINGS=2 NCCL_SINGLE_RING_THRESHOLD=10 NCCL_DEBUG=VERSION'
 
 
@@ -220,9 +220,19 @@ def mount_imagenet(job: ncluster.aws_backend.Job):
         assert vol_name in vols, f"Volume {vol_name} not found, set your NCLUSTER_ZONE={zone} and run replicate_imagenet.py"
         vol = vols[vol_name]
         print(f"Attaching {vol_name} to {t.name}")
-        if vol.attachments and vol.attachments[0]['InstanceId'] == t.instance.id:
-            print(f"{vol_name} already attached")
-            continue
+        if vol.attachments:
+            instance = ec2.Instance(vol.attachments[0]['InstanceId'])
+            if instance.id == t.instance.id:
+                print(f"{vol_name} already attached")
+                continue
+            else:  # attached to some other instance, detach
+                print(f"detaching {vol_name} from {u.get_name(instance)}")
+                vol.detach_from_instance()
+                vol.reload()
+                while vol.state != 'available':
+                    time.sleep(5)
+                    print(f"waiting for detachment from {u.get_name(instance)}")
+                
         else:
             vol.attach_to_instance(InstanceId=t.instance.id, Device=DEFAULT_UNIX_DEVICE)
             attach_attempted = True
@@ -294,13 +304,11 @@ def main():
     job.rsync('.')
     #  job.upload('setup.sh')
     #  job.upload('worker_requirements.txt')  # todo(y): replace with rsync
-    job.run(f'source activate {args.conda_env}')
-    job.run('bash setup.sh')
+    job.run(f'source activate {args.conda_env} && bash setup.sh && pip install -U protobuf && killall python')
 
-    job.run('pip install -U protobuf')
-
-    nccl_params = get_nccl_params(args.machines, NUM_GPUS)
-
+    env_params = get_nccl_params(args.machines, NUM_GPUS)
+    env_params += " OMP_NUM_THREADS=1 "
+    
     # Training script args
     default_params = [
         datadir,
@@ -319,7 +327,7 @@ def main():
     # TODO: simplify args processing, or give link to actual commands run
     for i, task in enumerate(job.tasks):
         dist_params = f'--nproc_per_node=8 --nnodes={args.machines} --node_rank={i} --master_addr={job.tasks[0].ip} --master_port={6006}'
-        cmd = f'{nccl_params} python -m torch.distributed.launch {dist_params} training/train_imagenet_nv.py {training_params}'
+        cmd = f'{env_params} python -m torch.distributed.launch {dist_params} training/train_imagenet_nv.py {training_params}'
         task.run(f'echo {cmd} > {job.logdir}/task-{i}.cmd')  # save command-line
         task.run(cmd, non_blocking=True)
 
