@@ -64,13 +64,16 @@ def main():
     # use filtering by description since Name is not public
     # snapshots = list(ec2.snapshots.filter(Filters=[{'Name': 'description', 'Values': [args.snapshot]},
     #                                                {'Name': 'owner-id', 'Values': [args.snapshot_account]}]))
-    snapshots = list(ec2.snapshots.filter(Filters=[{'Name': 'description', 'Values': [args.snapshot]}]))
-                     
-    assert len(snapshots) > 0, f"no snapshot matching {args.snapshot}"
-    assert len(snapshots) < 2, f"multiple snapshots matching {args.snapshot}"
-    snap = snapshots[0]
-    if not args.size_gb:
-        args.size_gb = snap.volume_size
+
+    snap = None
+    if not args.delete:
+        snapshots = list(ec2.snapshots.filter(Filters=[{'Name': 'description', 'Values': [args.snapshot]}]))
+
+        assert len(snapshots) > 0, f"no snapshot matching {args.snapshot}"
+        assert len(snapshots) < 2, f"multiple snapshots matching {args.snapshot}"
+        snap = snapshots[0]
+        if not args.size_gb:
+            args.size_gb = snap.volume_size
 
     # list existing volumes
     vols = {}
@@ -87,7 +90,10 @@ def main():
                 print("    Not found")
                 continue
             else:
-                vols[vol_name].delete()
+                try:
+                    vols[vol_name].delete()
+                except Exception as e:
+                    print(f"Deletion of {vol_name} failed with {e}")
             continue
 
         if vol_name in vols:
