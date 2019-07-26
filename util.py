@@ -2,6 +2,8 @@ import base64
 import pickle
 import re
 import subprocess
+import threading
+from typing import Tuple
 
 
 def extract_ec2_metadata():
@@ -55,3 +57,75 @@ def text_unpickle(pickle_string_encoded: str):
         return None
     obj = pickle.loads(base64.b64decode(pickle_string_encoded))
     return obj
+
+
+def format_env(**d):
+    """Converts env var values into variable string, ie
+        'var1="val1" var2="val2" '"""
+    args_ = [f'{key}="{d[key]}" ' for key in d]
+    return ''.join(args_)
+
+
+def format_env_export(**d):
+    """Converts env var values into variable string, ie
+        'export var1="val1" && export var2="val2" '"""
+    args_ = [f'export {key}="{d[key]}" ' for key in d]
+    return ' && '.join(args_)
+
+
+def format_env_x(**d):
+    """Converts env var values into format suitable for mpirun, ie
+        '-x var1="val1" -x var2="val2" '"""
+    args_ = [f'-x {key}="{d[key]}" ' for key in sorted(d)]
+    return ''.join(args_)
+
+
+def setup_mpi(job, skip_ssh_setup=False) -> Tuple[str, str]:
+    """Sets up passwordless SSH between all tasks in the job."""
+    public_keys = {}
+    if not skip_ssh_setup:
+        for task in job.tasks:
+            key_fn = '~/.ssh/id_rsa'  # this fn is special, used by default by ssh
+            task.run(f"yes | ssh-keygen -t rsa -f {key_fn} -N ''")
+
+            public_keys[task] = task.read(key_fn + '.pub')
+
+        keys = {}
+        for i, task1 in enumerate(job.tasks):
+            task1.run('echo "StrictHostKeyChecking no" >> /etc/ssh/ssh_config',
+                      sudo=True, non_blocking=True)
+            for j, task2_ in enumerate(job.tasks):
+                #  task1 ->ssh-> task2
+                #  task2.run(f'echo "{public_keys[task1]}" >> ~/.ssh/authorized_keys',
+                #         non_blocking=True)
+                keys.setdefault(j, []).append(public_keys[task1])
+
+        def setup_task_mpi(j2):
+            task2 = job.tasks[j2]
+            key_str = '\n'.join(keys[j2])
+            fn = f'task-{j2}'
+            with open(fn, 'w') as f:
+                f.write(key_str)
+            task2.upload(fn)
+            task2.run(f"""echo `cat {fn}` >> ~/.ssh/authorized_keys""",
+                      non_blocking=True)
+
+        run_parallel(setup_task_mpi, range(len(job.tasks)))
+        #        for j, task2_ in enumerate(job.tasks):
+        #            setup_task_mpi(j)
+
+    task0 = job.tasks[0]
+    hosts = [task.ip for task in job.tasks]
+    hosts_str = ','.join(hosts)
+    hosts_file_lines = [f'{host} slots={task0.num_gpus} max-slots={task0.num_gpus}' for host in hosts]
+    hosts_file_str = '\n'.join(hosts_file_lines)
+    return hosts_str, hosts_file_str
+
+
+def run_parallel(f, args_):
+    threads = [threading.Thread(name=f'run_parallel_{i}', target=f, args=[t]) for i, t in enumerate(args_)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+

@@ -13,26 +13,33 @@ from ncluster import aws_util as u
 import util
 
 # IMAGE_NAME = 'pytorch.imagenet.source.v7'
-NUM_GPUS = 8
+HOSTS_SLOTS_FN = 'hosts.slots'
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--name', type=str, default='imagenet',
                     help="name of the current run, used for machine naming and tensorboard visualization")
 parser.add_argument('--machines', type=int, default=1,
                     help="how many machines to use")
+parser.add_argument('--num_tasks', type=int, default=1,
+                    help="same as machines for compatibility, don't use")
 parser.add_argument('--mount_imagenet', type=int, default=0,
                     help="if set, mount imagenet disk rather than taking data from local image")
 parser.add_argument('--vmtouch', type=int, default=0,
                     help="lock all examples into physical memory")
-#vmtouch -dl /var/www/htdocs/critical/
 parser.add_argument('--internal_config_fn', type=str, default='config_dict',
                     help='location of filename with extra info to log')
+parser.add_argument('--nproc_per_node', type=int, default=8, help="Processes per machine, must not exceed number of GPUS")
 parser.add_argument('--offset', type=int, default=0,
                     help='offset for imagenet ebs numbering')
-parser.add_argument('--image_name', type=str, default='Deep Learning AMI (Ubuntu) Version 23.0', help="Image to use for this run")
+parser.add_argument('--image_name', type=str, default='Deep Learning AMI (Ubuntu) Version 23.0',
+                    help="Image to use for this run")
 parser.add_argument('--instance_type', type=str, default='p3.16xlarge', help="Image to use for this run")
 parser.add_argument('--conda_env', type=str, default='pytorch_p36', help="name of conda env")
+parser.add_argument('--efa', type=int, default=0, help="use AWS EFA network")
+parser.add_argument('--no_op', type=int, default=0, help='just print environment/debug info and skip rest')
+parser.add_argument('--skip_setup', action='store_true')
 args = parser.parse_args()
+args.num_tasks = args.machines
 
 # 109:12 to 93.00
 # events: https://s3.amazonaws.com/yaroslavvb/logs/imagenet-1
@@ -232,7 +239,7 @@ def mount_imagenet(job: ncluster.aws_backend.Job):
                 while vol.state != 'available':
                     time.sleep(5)
                     print(f"waiting for detachment from {u.get_name(instance)}")
-                
+
         else:
             vol.attach_to_instance(InstanceId=t.instance.id, Device=DEFAULT_UNIX_DEVICE)
             attach_attempted = True
@@ -246,12 +253,12 @@ def mount_imagenet(job: ncluster.aws_backend.Job):
         assert vol.attachments[0]['InstanceId'] == job.tasks[0].instance.id
 
     job.tasks[0].run('df')
-    if DEFAULT_UNIX_DEVICE not in job.tasks[0].output:
+    if '/data' not in job.tasks[0].output:
         job.run(f'sudo mkdir -p /data && sudo chown `whoami` /data && sudo mount {DEFAULT_UNIX_DEVICE} /data')
     while True:
         job.tasks[0].run('df')
         status = job.tasks[0].output
-        if DEFAULT_UNIX_DEVICE in status:
+        if '/data' in status:
             print('Volume already mounted, ignoring')
             break
         time.sleep(ATTACH_WAIT_INTERVAL_SEC)
@@ -274,14 +281,25 @@ def main():
                             num_tasks=args.machines,
                             image_name=args.image_name,
                             instance_type=args.instance_type,
-                            disk_size=200,
+                            disk_size=500,
+                            skip_setup=args.skip_setup,
                             )
+    task0 = job.tasks[0]
 
     config = {}
     for key in os.environ:
         if re.match(r"^NCLUSTER", key):
-            config['env_'+key] = os.getenv(key)
+            config['env_' + key] = os.getenv(key)
     config.update(vars(args))
+
+    CUDA_HOME = f'/usr/local/cuda'
+    EFA_HOME = f'/opt/amazon/efa'
+    MPI_HOME = EFA_HOME
+    NPROC_PER_NODE = args.nproc_per_node
+    assert NPROC_PER_NODE <= task0.num_gpus, f"requested {NPROC_PER_NODE} processes, but only {task0.num_gpus} gpus present"
+    NUM_GPUS = NPROC_PER_NODE * args.num_tasks
+
+    config['NUM_GPUS'] = NUM_GPUS
 
     config['internal_id'] = u.get_account_number()
     config['internal_alias'] = u.get_account_name()
@@ -290,7 +308,7 @@ def main():
     config['launch_user'] = os.environ.get('USER', '')
     config['cmd'] = ' '.join(sys.argv)
     config['launcher_conda'] = util.ossystem('echo ${CONDA_PREFIX:-"$(dirname $(which conda))/../"}')
-    config['launcher_cmd'] = 'python '+' '.join(sys.argv)
+    config['launcher_cmd'] = 'python ' + ' '.join(sys.argv)
     config['logdir'] = job.logdir
 
     pickled_config = util.text_pickle(config)
@@ -302,13 +320,20 @@ def main():
 
     job.run('rm -f *.py')  # remove files backed into imagenet18 release image
     job.rsync('.')
-    #  job.upload('setup.sh')
-    #  job.upload('worker_requirements.txt')  # todo(y): replace with rsync
-    job.run(f'source activate {args.conda_env} && bash setup.sh && pip install -U protobuf && killall python')
+
+    if args.efa:
+        assert 'efa' in args.image_name  # make sure we use EFA-enabled image
+        job.run(f'{{ source activate {args.conda_env} ; }}  && {{ killall python || echo hi ; }} ')
+        hosts_str, hosts_file_str = util.setup_mpi(job, skip_ssh_setup=args.skip_setup)
+        task0.write(HOSTS_SLOTS_FN, hosts_file_str)
+
+    else:
+        job.run(
+            f'{{ source activate {args.conda_env} && bash setup.sh && pip install -U protobuf ; }}  && {{ killall python || echo hi ; }} ')
 
     env_params = get_nccl_params(args.machines, NUM_GPUS)
     env_params += " OMP_NUM_THREADS=1 "
-    
+
     # Training script args
     default_params = [
         datadir,
@@ -320,16 +345,51 @@ def main():
         '--no-bn-wd',
     ]
 
-    params = ['--phases', schedules[args.machines]]
+    params = ['--phases', util.text_pickle(schedules[args.machines])]
     training_params = default_params + params
     training_params = ' '.join(map(format_params, training_params))
 
-    # TODO: simplify args processing, or give link to actual commands run
-    for i, task in enumerate(job.tasks):
-        dist_params = f'--nproc_per_node=8 --nnodes={args.machines} --node_rank={i} --master_addr={job.tasks[0].ip} --master_port={6006}'
-        cmd = f'{env_params} python -m torch.distributed.launch {dist_params} training/train_imagenet_nv.py {training_params}'
-        task.run(f'echo {cmd} > {job.logdir}/task-{i}.cmd')  # save command-line
-        task.run(cmd, non_blocking=True)
+    if not args.efa:
+        # TODO: simplify args processing, or give link to actual commands run
+        for i, task in enumerate(job.tasks):
+            dist_params = f'--nproc_per_node={args.nproc_per_node} --nnodes={args.machines} --node_rank={i} --master_addr={job.tasks[0].ip} --master_port={6006}'
+            cmd = f'{env_params} python -m torch.distributed.launch {dist_params} training/train_imagenet_nv.py {training_params}'
+            task.run(f'echo {cmd} > {job.logdir}/task-{i}.cmd')  # save command-line
+            task.run(cmd, non_blocking=True)
+    else:
+        FI_PROVIDER = 'efa'
+
+        local_env = util.format_env_export(LOCAL_RANK='$OMPI_COMM_WORLD_LOCAL_RANK',
+                                           RANK='$OMPI_COMM_WORLD_RANK',
+                                           WORLD_SIZE='$OMPI_COMM_WORLD_SIZE',
+                                           MASTER_ADDR=task0.ip,
+                                           MASTER_PORT=6016)
+
+        mpi_env = util.format_env_x(FI_PROVIDER=FI_PROVIDER,        # Enables running nccl-tests using EFA provider.
+                                    FI_OFI_RXR_RX_COPY_UNEXP=1,     #  Disables using bounce buffers for unexpected messages.
+                                    FI_OFI_RXR_RX_COPY_OOO=1,       # Disables using bounce buffers for out of order messages.
+                                    FI_EFA_MR_CACHE_ENABLE=1,       # Enables memory region caching.
+                                    FI_OFI_RXR_INLINE_MR_ENABLE=1,  # Enables inline memory registration of data buffers.
+                                    NCCL_TREE_THRESHOLD=10 * 4294967296,  # force tree for everything under 40GB
+                                    LD_LIBRARY_PATH=f'{CUDA_HOME}/lib:{CUDA_HOME}/lib64:{EFA_HOME}/lib64',
+                                    NCCL_DEBUG='INFO')
+        if args.no_op:
+            worker_script_fn = 'training/env_test.py'
+        else:
+            worker_script_fn = 'training/train_imagenet_nv.py'
+
+        local_cmd = [f"{local_env} && source activate {args.conda_env} && ",
+                     f'python {worker_script_fn} {training_params} --local_rank="$LOCAL_RANK"']
+        local_cmd = ' '.join(local_cmd)
+
+        cmd = [f"{MPI_HOME}/bin/mpirun -n {NUM_GPUS} -N {NPROC_PER_NODE} --hostfile {HOSTS_SLOTS_FN} ",
+               f'{mpi_env} ',
+               f'--mca btl tcp,self --mca btl_tcp_if_exclude lo,docker0 ',
+               f'--bind-to none ',
+               f"bash -c '{local_cmd}'"]
+        cmd = ' '.join(cmd)
+
+        task0.run(cmd, non_blocking=True)
 
     print(f"Logging to {job.logdir}")
 

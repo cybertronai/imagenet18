@@ -149,7 +149,8 @@ def main():
     shutil.copy2(os.path.realpath(__file__), f'{args.logdir}')
 
     log.console("Creating data loaders (this could take up to 10 minutes if volume needs to be warmed up)")
-    phases = eval(args.phases)
+    #phases = eval(args.phases)
+    phases = util.text_unpickle(args.phases)
     dm = DataManager([copy.deepcopy(p) for p in phases if 'bs' in p])
     scheduler = Scheduler(optimizer, [copy.deepcopy(p) for p in phases if 'lr' in p])
 
