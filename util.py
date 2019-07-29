@@ -1,6 +1,8 @@
 import base64
 import pickle
+import random
 import re
+import string
 import subprocess
 import threading
 from typing import Tuple
@@ -21,6 +23,12 @@ def extract_ec2_metadata():
             }
     except:  # may crash with requests.exceptions.ConnectTimeout when not on AWS
         return {}
+
+
+def random_id(k=5):
+  """Random id to use for AWS identifiers."""
+  #  https://stackoverflow.com/questions/2257441/random-string-generation-with-upper-case-letters-and-digits-in-python
+  return ''.join(random.choices(string.ascii_lowercase + string.digits, k=k))
 
 
 def log_environment():

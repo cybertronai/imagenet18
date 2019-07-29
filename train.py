@@ -22,26 +22,30 @@ parser.add_argument('--machines', type=int, default=1,
                     help="how many machines to use")
 parser.add_argument('--num_tasks', type=int, default=1,
                     help="same as machines for compatibility, don't use")
-parser.add_argument('--mount_imagenet', type=int, default=0,
+parser.add_argument('--mount_imagenet', type=int, default=1,
                     help="if set, mount imagenet disk rather than taking data from local image")
+parser.add_argument('--offset', type=int, default=0,
+                    help='offset for imagenet ebs numbering')
 parser.add_argument('--vmtouch', type=int, default=0,
                     help="lock all examples into physical memory")
 parser.add_argument('--internal_config_fn', type=str, default='config_dict',
                     help='location of filename with extra info to log')
 parser.add_argument('--nproc_per_node', type=int, default=8, help="Processes per machine, must not exceed number of GPUS")
-parser.add_argument('--offset', type=int, default=0,
-                    help='offset for imagenet ebs numbering')
 parser.add_argument('--image_name', type=str, default='Deep Learning AMI (Ubuntu) Version 23.0',
                     help="Image to use for this run")
 parser.add_argument('--instance_type', type=str, default='p3.16xlarge', help="Image to use for this run")
 parser.add_argument('--conda_env', type=str, default='pytorch_p36', help="name of conda env")
 parser.add_argument('--efa', type=int, default=0, help="use AWS EFA network")
+parser.add_argument('--pseudo_efa', type=int, default=0, help="use sockets interface when launching under EFA")
 parser.add_argument('--no_op', type=int, default=0, help='just print environment/debug info and skip rest')
 parser.add_argument('--skip_setup', action='store_true')
+parser.add_argument('--log_all_workers', type=int, default=0, help='log from each worker instead of just chief')
+parser.add_argument('--spot', action='store_true', help='use spot instead of regular instances')
 args = parser.parse_args()
 args.num_tasks = args.machines
 
 # 109:12 to 93.00
+# https://app.wandb.ai/yaroslavvb/imagenet18/runs/gxsdo6i0
 # events: https://s3.amazonaws.com/yaroslavvb/logs/imagenet-1
 # logs: https://s3.amazonaws.com/yaroslavvb/logs/imagenet1.tar
 lr = 1.0
@@ -60,6 +64,7 @@ one_machine = [
     {'ep': (33, 35), 'lr': lr / 1000 * scale_288}
 ]
 
+# https://app.wandb.ai/yaroslavvb/imagenet18/runs/lhx5a053
 lr = 0.75 * 2
 bs = [256, 224, 128]  # largest batch size that fits in memory for each image size
 bs_scale = [x / bs[0] for x in bs]  # scale learning rate to batch size
@@ -148,10 +153,10 @@ schedules = {1: one_machine,
 
 
 # routines to build NCCL ring orders
-def get_nccl_params(num_tasks, num_gpus):
+def get_nccl_params(num_tasks, nproc_per_node):
     if num_tasks <= 1:
         return 'NCCL_DEBUG=VERSION'
-    nccl_rings = get_nccl_rings(num_tasks, num_gpus)
+    nccl_rings = get_nccl_rings(num_tasks, nproc_per_node)
     return f'NCCL_RINGS="{nccl_rings}" NCCL_SINGLE_RING_THRESHOLD=10 NCCL_DEBUG=VERSION '
     # return 'NCCL_MIN_NRINGS=2 NCCL_SINGLE_RING_THRESHOLD=10 NCCL_DEBUG=VERSION'
 
@@ -223,7 +228,7 @@ def mount_imagenet(job: ncluster.aws_backend.Job):
 
     attach_attempted = False
     for i, t in enumerate(job.tasks):
-        vol_name = f'imagenet_{zone[-2:]}_{i:02d}'
+        vol_name = f'imagenet_{zone[-2:]}_{i+args.offset:02d}'
         assert vol_name in vols, f"Volume {vol_name} not found, set your NCLUSTER_ZONE={zone} and run replicate_imagenet.py"
         vol = vols[vol_name]
         print(f"Attaching {vol_name} to {t.name}")
@@ -247,7 +252,7 @@ def mount_imagenet(job: ncluster.aws_backend.Job):
     if attach_attempted:
         time.sleep(2)  # wait for attachment to succeed
         i = 0
-        vol_name = f'imagenet_{zone[-2:]}_{i:02d}'
+        vol_name = f'imagenet_{zone[-2:]}_{i+args.offset:02d}'
         vol = vols[vol_name]
         vol.reload()
         assert vol.attachments[0]['InstanceId'] == job.tasks[0].instance.id
@@ -282,6 +287,7 @@ def main():
                             image_name=args.image_name,
                             instance_type=args.instance_type,
                             disk_size=500,
+                            spot=args.spot,
                             skip_setup=args.skip_setup,
                             )
     task0 = job.tasks[0]
@@ -331,7 +337,7 @@ def main():
         job.run(
             f'{{ source activate {args.conda_env} && bash setup.sh && pip install -U protobuf ; }}  && {{ killall python || echo hi ; }} ')
 
-    env_params = get_nccl_params(args.machines, NUM_GPUS)
+    env_params = get_nccl_params(args.machines, args.nproc_per_node)
     env_params += " OMP_NUM_THREADS=1 "
 
     # Training script args
@@ -339,10 +345,11 @@ def main():
         datadir,
         '--fp16',
         '--logdir', job.logdir,
-        '--name', args.name,
+        '--name', f'{args.name}-{util.random_id()}',
         '--distributed',
         '--init-bn0',
         '--no-bn-wd',
+        '--log_all_workers', args.log_all_workers,
     ]
 
     params = ['--phases', util.text_pickle(schedules[args.machines])]
@@ -358,6 +365,8 @@ def main():
             task.run(cmd, non_blocking=True)
     else:
         FI_PROVIDER = 'efa'
+        if args.pseudo_efa:
+            FI_PROVIDER = 'sockets'
 
         local_env = util.format_env_export(LOCAL_RANK='$OMPI_COMM_WORLD_LOCAL_RANK',
                                            RANK='$OMPI_COMM_WORLD_RANK',

@@ -77,6 +77,7 @@ def get_parser():
     parser.add_argument('--short-epoch', action='store_true',
                         help='make epochs short (for debugging)')
     parser.add_argument('--internal_config_fn', type=str, default='config_dict', help='location of filename with extra info to log')
+    parser.add_argument('--log_all_workers', type=int, default=0, help='log from each worker instead of just chief')
     return parser
 
 
@@ -84,20 +85,32 @@ cudnn.benchmark = True
 args = get_parser().parse_args()
 
 # Only want master rank logging to tensorboard
-is_master = (not args.distributed) or (dist_utils.env_rank() == 0)
+is_master = os.environ.get('RANK', '0') == '0'
 is_rank0 = args.local_rank == 0
 
-if is_master:
+
+if args.log_all_workers:
+    wandb.init(project='imagenet18', group=args.name, name=args.name+'-'+os.environ.get("RANK", "0"))
+else:
+    if not is_master:
+        os.environ['WANDB_MODE'] = 'dryrun'  # all wandb.log are no-op
     wandb.init(project='imagenet18', name=args.name)
-    wandb.config['gpus'] = int(os.environ.get('WORLD_SIZE', 1))
-    config = util.text_unpickle(open(args.internal_config_fn).read())
-    # todo(y): only do filename not abspath
-    config['worker_conda'] = util.ossystem('echo ${CONDA_PREFIX:-"$(dirname $(which conda))/../"}')
-    wandb.config.update(config)
-    util.log_environment()
+
+wandb.config['gpus'] = int(os.environ.get('WORLD_SIZE', 1))
+
 
 tb = TensorboardLogger(args.logdir, is_master=is_master)
 log = FileLogger(args.logdir, is_master=is_master, is_rank0=is_rank0)
+
+try:
+    config = util.text_unpickle(open(args.internal_config_fn).read())
+except Exception as e:
+    log.console(f'couldnt open wandb config file with {e}')
+    config = {}
+
+config['worker_conda'] = os.path.basename(util.ossystem('echo ${CONDA_PREFIX:-"$(dirname $(which conda))/../"}'))
+wandb.config.update(config)
+util.log_environment()
 
 
 def main():
@@ -120,8 +133,10 @@ def main():
 
     log.console("Loading model")
     model = resnet.resnet50(bn0=args.init_bn0).cuda()
-    if args.fp16:  model = network_to_half(model)
-    if args.distributed:  model = dist_utils.DDP(model, device_ids=[args.local_rank], output_device=args.local_rank)
+    if args.fp16:
+        model = network_to_half(model)
+    if args.distributed:
+        model = dist_utils.DDP(model, device_ids=[args.local_rank], output_device=args.local_rank)
     best_top5 = 93  # only save models over 93%. Otherwise it stops to save every time
 
     global model_params, master_params
@@ -149,13 +164,13 @@ def main():
     shutil.copy2(os.path.realpath(__file__), f'{args.logdir}')
 
     log.console("Creating data loaders (this could take up to 10 minutes if volume needs to be warmed up)")
-    #phases = eval(args.phases)
     phases = util.text_unpickle(args.phases)
     dm = DataManager([copy.deepcopy(p) for p in phases if 'bs' in p])
     scheduler = Scheduler(optimizer, [copy.deepcopy(p) for p in phases if 'lr' in p])
 
     start_time = datetime.now()  # Loading start to after everything is loaded
-    if args.evaluate: return validate(dm.val_dl, model, criterion, 0, start_time)
+    if args.evaluate:
+        return validate(dm.val_dl, model, criterion, 0, start_time)
 
     if args.distributed:
         log.console('Syncing machines before training')
@@ -174,8 +189,9 @@ def main():
         is_best = top5 > best_top5
         best_top5 = max(top5, best_top5)
         if args.local_rank == 0:
-            if is_best:  save_checkpoint(epoch, model, best_top5, optimizer, is_best=True,
-                                         filename='model_best.pth.tar')
+            if is_best:
+                save_checkpoint(epoch, model, best_top5, optimizer, is_best=True,
+                                filename='model_best.pth.tar')
             phase = dm.get_phase(epoch)
             if phase:  save_checkpoint(epoch, model, best_top5, optimizer,
                                        filename=f'sz{phase["bs"]}_checkpoint.path.tar')
@@ -474,6 +490,7 @@ def listify(p=None, q=None):
     return p
 
 # todo(y): pdb debug on error
+
 
 if __name__ == '__main__':
     try:

@@ -3,10 +3,13 @@ Code to reproduce ImageNet in 18 minutes, by Andrew Shaw, Yaroslav Bulatov, and 
 
 Pre-requisites: Python 3.6 or higher
 
+- Set your `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` (example [instructions](https://docs.google.com/document/d/1Z8lCZVWXs7XORbiNmBAsBDtouV3KwrtH8-UL5M-zHus/edit))
+
 ```
 pip install -r requirements.txt
-aws configure  (or set your AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_DEFAULT_REGION)
-python train.py 
+python tools/replicate_imagenet.py --replicas=16   # configure 16 high performance disks
+python train.py
+python tools/replicate_imagenet.py --replicas=16 --delete  # delete high performance disks
 ```
 
 To run with smaller number of machines:
@@ -18,24 +21,29 @@ python train.py --machines=8
 python train.py --machines=16
 ```
 
-Your AWS account needs to have high enough limit in order to reserve this number of p3.16xlarge instances. The code will set up necessary infrastructure like EFS, VPC, subnets, keypairs and placement groups. Therefore permissions for these those resources are needed.
+To run as spot prices, add `--spot` argument, ie `train.py --spot`
+
+Your AWS account needs to have high enough limit in order to reserve this number of p3.16xlarge instances. The code will set up necessary infrastructure like EFS, VPC, subnets, keypairs and placement groups. Therefore permissions to create these those resources are needed. Note that high performance disks cost about $1/hour, so make sure to delete them after using.
 
 
 # Checking progress
 
-Machines print progress to local stdout as well as logging TensorBoard event files to EFS. You can:
+Machines print progress to local stdout, log TensorBoard event files to EFS under unique directory and also send data to wandb if WANDB_API_KEY env var is set (it's under https://app.wandb.ai/settings).
 
+
+## TensorBoard
 1. launch tensorboard using tools/launch_tensorboard.py
 
 That will provide a link to tensorboard instance which has loss graph under "losses" group. You'll see something like this under "Losses" tab
 <img src='https://raw.githubusercontent.com/diux-dev/imagenet18/master/tensorboard.png'>
 
-2. Connect to one of the instances using instructions printed during launch. Look for something like this
+## Console
+You can connect to one of the instances using instructions printed during launch. Look for something like this
 
 ```
-2018-09-06 17:26:23.562096 15.imagenet: To connect to 15.imagenet
-ssh -i /Users/yaroslav/.ncluster/ncluster5-yaroslav-316880547378-us-east-1.pem -o StrictHostKeyChecking=no ubuntu@18.206.193.26
-tmux a
+2019-07-29 15:58:10.653377 0.monday-quad: To connect to 0.monday-quad do "ncluster connect 0.monday-quad" or
+    ssh ubuntu@184.73.100.7
+    tmux a
 ```
 
 This will connect you to tmux session and you will see something like this
@@ -52,5 +60,10 @@ Test:  [21][7/7]        Time 0.105 (0.432)      Loss 1.4089 (1.3346)    Acc@1 67
 
 The last number indicates that at epoch 21 the run got 67.462 top-1 test accuracy and 88.124 top-5 test accuracy.
 
+## Weights and Biases
+
+Runs will show up under under "imagenet18" project in your Weights and Biases page.
+
 # Other notes
-If you run locally, you may need to download imagenet yourself, follow instructions here -- https://github.com/diux-dev/cluster/tree/master/pytorch#data-preparation
+If you run locally, you may need to download imagenet yourself from [here](https://s3.amazonaws.com/yaroslavvb2/data/imagenet18.tar)
+
