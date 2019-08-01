@@ -89,6 +89,7 @@ is_master = os.environ.get('RANK', '0') == '0'
 is_rank0 = args.local_rank == 0
 
 
+os.environ['WANDB_SILENT'] = '1'
 if args.log_all_workers:
     wandb.init(project='imagenet18', group=args.name, name=args.name+'-'+os.environ.get("RANK", "0"))
 else:

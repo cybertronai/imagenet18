@@ -31,7 +31,7 @@ parser.add_argument('--vmtouch', type=int, default=0,
 parser.add_argument('--internal_config_fn', type=str, default='config_dict',
                     help='location of filename with extra info to log')
 parser.add_argument('--nproc_per_node', type=int, default=8, help="Processes per machine, must not exceed number of GPUS")
-parser.add_argument('--image_name', type=str, default='Deep Learning AMI (Ubuntu) Version 23.0',
+parser.add_argument('--image_name', type=str, default='pytorch-efa01',
                     help="Image to use for this run")
 parser.add_argument('--instance_type', type=str, default='p3.16xlarge', help="Image to use for this run")
 parser.add_argument('--conda_env', type=str, default='pytorch_p36', help="name of conda env")
@@ -41,6 +41,9 @@ parser.add_argument('--no_op', type=int, default=0, help='just print environment
 parser.add_argument('--skip_setup', action='store_true')
 parser.add_argument('--log_all_workers', type=int, default=0, help='log from each worker instead of just chief')
 parser.add_argument('--spot', action='store_true', help='use spot instead of regular instances')
+parser.add_argument('--cuda_debug', action='store_true', help='debug cuda errors')
+parser.add_argument('--pytorch_nightly', action='store_true', help='install nightly PyTorch')
+parser.add_argument('--simple_ring_setup', action='store_true', help='set 16 rings instead of manual ring order')
 args = parser.parse_args()
 args.num_tasks = args.machines
 
@@ -64,6 +67,7 @@ one_machine = [
     {'ep': (33, 35), 'lr': lr / 1000 * scale_288}
 ]
 
+# 54 minutes to 93.364
 # https://app.wandb.ai/yaroslavvb/imagenet18/runs/lhx5a053
 lr = 0.75 * 2
 bs = [256, 224, 128]  # largest batch size that fits in memory for each image size
@@ -86,6 +90,8 @@ two_machines = [
 # 29:44 to 93.05
 # events: https://s3.amazonaws.com/yaroslavvb/logs/imagenet-4
 # logs: https://s3.amazonaws.com/yaroslavvb/logs/imagenet-4.tar
+
+# p3dn: https://app.wandb.ai/yaroslavvb/imagenet18/runs/pp0g9k5c
 lr = 0.50 * 4  # 4 = num tasks
 bs = [256, 224,
       128]  # largest batch size that fits in memory for each image size
@@ -157,7 +163,11 @@ def get_nccl_params(num_tasks, nproc_per_node):
     if num_tasks <= 1:
         return 'NCCL_DEBUG=VERSION'
     nccl_rings = get_nccl_rings(num_tasks, nproc_per_node)
-    return f'NCCL_RINGS="{nccl_rings}" NCCL_SINGLE_RING_THRESHOLD=10 NCCL_DEBUG=VERSION '
+    env = f'NCCL_RINGS="{nccl_rings}" NCCL_SINGLE_RING_THRESHOLD=10 '
+    if args.simple_ring_setup:
+        env = f'NCCL_MIN_NRINGS=16 NCCL_MAX_NRINGS=16 '
+
+    return env
     # return 'NCCL_MIN_NRINGS=2 NCCL_SINGLE_RING_THRESHOLD=10 NCCL_DEBUG=VERSION'
 
 
@@ -220,6 +230,7 @@ ATTACH_WAIT_INTERVAL_SEC = 5
 def mount_imagenet(job: ncluster.aws_backend.Job):
     """Attaches EBS disks with imagenet data to each task of the job."""
 
+    task0 = job.tasks[0]
     zone = u.get_zone()
     vols = {}
     ec2 = u.get_ec2_resource()
@@ -240,10 +251,12 @@ def mount_imagenet(job: ncluster.aws_backend.Job):
             else:  # attached to some other instance, detach
                 print(f"detaching {vol_name} from {u.get_name(instance)}")
                 vol.detach_from_instance()
-                vol.reload()
                 while vol.state != 'available':
+                    vol.reload()
                     time.sleep(5)
                     print(f"waiting for detachment from {u.get_name(instance)}")
+                vol.attach_to_instance(InstanceId=t.instance.id, Device=DEFAULT_UNIX_DEVICE)
+                attach_attempted = True
 
         else:
             vol.attach_to_instance(InstanceId=t.instance.id, Device=DEFAULT_UNIX_DEVICE)
@@ -257,16 +270,24 @@ def mount_imagenet(job: ncluster.aws_backend.Job):
         vol.reload()
         assert vol.attachments[0]['InstanceId'] == job.tasks[0].instance.id
 
-    job.tasks[0].run('df')
-    if '/data' not in job.tasks[0].output:
-        job.run(f'sudo mkdir -p /data && sudo chown `whoami` /data && sudo mount {DEFAULT_UNIX_DEVICE} /data')
-    while True:
-        job.tasks[0].run('df')
-        status = job.tasks[0].output
-        if '/data' in status:
-            print('Volume already mounted, ignoring')
-            break
+    def strip_dev(d):
+        return d[len('/dev/'):]
+
+    # attach the volume if needed
+    df_output = task0.run('df', return_output=True)
+    actual_device = DEFAULT_UNIX_DEVICE
+    if '/data' not in df_output:
+        # hack for p3dn's ignoring device name during volume attachment
+        lsblk_output = task0.run('lsblk', return_output=True)
+        if strip_dev(DEFAULT_UNIX_DEVICE) not in lsblk_output:
+            actual_device = '/dev/nvme3n1'
+            assert strip_dev(actual_device) in lsblk_output, f"Hack for p3dn failed, {actual_device} not found, " \
+                f"available devices '{lsblk_output}'"
+
+        job.run(f'sudo mkdir -p /data && sudo chown `whoami` /data && sudo mount {actual_device} /data')
+    while '/data' not in task0.run('df', return_output=True):
         time.sleep(ATTACH_WAIT_INTERVAL_SEC)
+        print(f"Waiting for attachment")
 
 
 def main():
@@ -281,6 +302,9 @@ def main():
         datadir = '~/data/imagenet'
         os.environ['NCLUSTER_AWS_FAST_ROOTDISK'] = '1'  # use io2 disk on AWS
 
+    if args.num_tasks >= 16:
+        assert args.simple_ring_setup, "must use --simple_ring_setup, otherwise NCCL_RINGS env var exceeds cmd-line limit"
+        
     job = ncluster.make_job(name=args.name,
                             run_name=f"{args.name}-{args.machines}",
                             num_tasks=args.machines,
@@ -290,7 +314,9 @@ def main():
                             spot=args.spot,
                             skip_setup=args.skip_setup,
                             )
+
     task0 = job.tasks[0]
+    logdir = task0.logdir  # workaround for race condition in creating logdir
 
     config = {}
     for key in os.environ:
@@ -336,8 +362,15 @@ def main():
     else:
         job.run(
             f'{{ source activate {args.conda_env} && bash setup.sh && pip install -U protobuf ; }}  && {{ killall python || echo hi ; }} ')
+        if args.pytorch_nightly:
+            job.run('conda install -y -c pytorch pytorch-nightly && bash setup.sh')
 
     env_params = get_nccl_params(args.machines, args.nproc_per_node)
+    if args.cuda_debug:
+        env_params += 'CUDA_LAUNCH_BLOCKING=1 NCCL_DEBUG=INFO '
+    else:
+        env_params += 'NCCL_DEBUG=VERSION '
+
     env_params += " OMP_NUM_THREADS=1 "
 
     # Training script args
