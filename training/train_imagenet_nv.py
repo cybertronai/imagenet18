@@ -46,8 +46,8 @@ def get_parser():
     parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
                         metavar='W', help='weight decay (default: 1e-4)')
     parser.add_argument('--init-bn0', action='store_true', help='Intialize running batch norm mean to 0')
-    parser.add_argument('--print-freq', '-p', default=5, type=int,
-                        metavar='N', help='log/print every this many steps (default: 5)')
+    parser.add_argument('--print-freq', '-p', default=50, type=int,
+                        metavar='N', help='log/print every this many steps (default: 50)')
     parser.add_argument('--no-bn-wd', action='store_true', help='Remove batch norm from weight decay')
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
                         help='path to latest checkpoint (default: none)')
