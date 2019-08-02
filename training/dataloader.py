@@ -16,6 +16,13 @@ import pickle
 from tqdm import tqdm
 from dist_utils import env_world_size, env_rank
 
+
+# util is one level up, so import that
+module_path = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.abspath(f'{module_path}/..'))
+
+import util
+
 def get_loaders(traindir, valdir, sz, bs, fp16=True, val_bs=None, workers=8, rect_val=False, min_scale=0.08, distributed=False):
     val_bs = val_bs or bs
     train_tfms = [
@@ -25,10 +32,18 @@ def get_loaders(traindir, valdir, sz, bs, fp16=True, val_bs=None, workers=8, rec
     train_dataset = datasets.ImageFolder(traindir, transforms.Compose(train_tfms))
     train_sampler = (DistributedSampler(train_dataset, num_replicas=env_world_size(), rank=env_rank()) if distributed else None)
 
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=bs, shuffle=(train_sampler is None),
-        num_workers=workers, pin_memory=True, collate_fn=fast_collate, 
-        sampler=train_sampler)
+    if util.is_set('PYTORCH_USE_SPAWN'):
+        print("Using SPAWN method for dataloader")
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=bs, shuffle=(train_sampler is None),
+            num_workers=workers, pin_memory=True, collate_fn=fast_collate, 
+            sampler=train_sampler,
+            multiprocessing_context='spawn')
+    else:
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=bs, shuffle=(train_sampler is None),
+            num_workers=workers, pin_memory=True, collate_fn=fast_collate, 
+            sampler=train_sampler)
 
     val_dataset, val_sampler = create_validation_set(valdir, val_bs, sz, rect_val=rect_val, distributed=distributed)
     val_loader = torch.utils.data.DataLoader(
@@ -113,6 +128,7 @@ class ValDataset(datasets.ImageFolder):
             target = self.target_transform(target)
 
         return sample, target
+
 
 class DistValSampler(Sampler):
     # DistValSampler distrbutes batches equally (based on batch size) to every gpu (even if there aren't enough images)

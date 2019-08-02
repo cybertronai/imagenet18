@@ -20,6 +20,8 @@ import dist_utils
 import experimental_utils
 import resnet
 
+from pprint import pprint as pp
+
 # util is one level up, so import that
 module_path = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.abspath(f'{module_path}/..'))
@@ -76,7 +78,7 @@ def get_parser():
                         help="name of the current run, used for machine naming and tensorboard visualization")
     parser.add_argument('--short-epoch', action='store_true',
                         help='make epochs short (for debugging)')
-    parser.add_argument('--internal_config_fn', type=str, default='config_dict', help='location of filename with extra info to log')
+    parser.add_argument('--internal_config_fn', type=str, default='ncluster_config_dict', help='location of filename with extra info to log')
     parser.add_argument('--log_all_workers', type=int, default=0, help='log from each worker instead of just chief')
     return parser
 
@@ -84,24 +86,41 @@ def get_parser():
 cudnn.benchmark = True
 args = get_parser().parse_args()
 
+# print some debug info
+RANK = os.environ.get('RANK', '0')
+LOCAL_RANK = os.environ.get('LOCAL_RANK', '-1')
+OMPI_COMM_WORLD_LOCAL_RANK = os.environ.get('OMPI_COMM_WORLD_LOCAL_RANK', '-1')
+IS_CHIEF = (RANK == '0')
+print(f"*** Debug: {os.uname()[1]} RANK={RANK} local_rank_arg={args.local_rank} LOCAL_RANK={LOCAL_RANK}, OMPI_COMM_WORLD_LOCAL_RANK={OMPI_COMM_WORLD_LOCAL_RANK}, {' '.join(sys.argv)}")
+
+pp(dict(os.environ))
+
 # Only want master rank logging to tensorboard
 is_master = os.environ.get('RANK', '0') == '0'
-is_rank0 = args.local_rank == 0
 
 
-os.environ['WANDB_SILENT'] = '1'
-if args.log_all_workers:
-    wandb.init(project='imagenet18', group=args.name, name=args.name+'-'+os.environ.get("RANK", "0"))
-else:
-    if not is_master:
-        os.environ['WANDB_MODE'] = 'dryrun'  # all wandb.log are no-op
-    wandb.init(project='imagenet18', name=args.name)
-
-wandb.config['gpus'] = int(os.environ.get('WORLD_SIZE', 1))
-
+# for mpirun the messages are propagated to main machine, so don't log in that case
+is_rank0 = (args.local_rank == 0) 
 
 tb = TensorboardLogger(args.logdir, is_master=is_master)
 log = FileLogger(args.logdir, is_master=is_master, is_rank0=is_rank0)
+
+
+if args.log_all_workers:
+    group_name=args.name
+    run_name=args.name + '-' + os.environ.get("RANK", "0")
+    wandb.init(project='imagenet18', group=group_name, name=run_name)
+    log.console("initializing wandb logging to group "+args.name+" name ")
+else:
+    if not is_master:
+        os.environ['WANDB_MODE'] = 'dryrun'  # all wandb.log are no-op
+        log.console("local-only wandb logging for run "+args.name)
+    wandb.init(project='imagenet18', name=args.name)
+    log.console("initializing logging to run "+args.name)
+
+if hasattr(wandb, 'config') and wandb.config is not None:
+    wandb.config['gpus'] = int(os.environ.get('WORLD_SIZE', 1))
+
 
 try:
     config = util.text_unpickle(open(args.internal_config_fn).read())
@@ -110,12 +129,13 @@ except Exception as e:
     config = {}
 
 config['worker_conda'] = os.path.basename(util.ossystem('echo ${CONDA_PREFIX:-"$(dirname $(which conda))/../"}'))
-wandb.config.update(config)
+if hasattr(wandb, 'config') and wandb.config is not None:
+    wandb.config.update(config)
 util.log_environment()
 
 
 def main():
-    os.system('shutdown -c')  # cancel previous shutdown command
+    os.system('sudo shutdown -c')  # cancel previous shutdown command
     log.console(args)
     tb.log('sizes/world', dist_utils.env_world_size())
 
@@ -130,6 +150,7 @@ def main():
         dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
                                 world_size=dist_utils.env_world_size())
         assert (dist_utils.env_world_size() == dist.get_world_size())
+        # todo(y): use global_rank instead of local_rank here
         log.console("Distributed: success (%d/%d)" % (args.local_rank, dist.get_world_size()))
 
     log.console("Loading model")
@@ -210,6 +231,8 @@ def train(trn_loader, model, criterion, optimizer, scheduler, epoch):
     for i, (input, target) in enumerate(trn_loader):
         if args.short_epoch and (i > 10):  break
         batch_num = i + 1
+
+        # TODO(y): cuda is async so some time spent inside step is not inside batch_start/batch_end measurement
         timer.batch_start()
         scheduler.update_lr(epoch, i + 1, len(trn_loader))
 

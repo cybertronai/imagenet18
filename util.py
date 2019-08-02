@@ -1,4 +1,5 @@
 import base64
+import os
 import pickle
 import random
 import re
@@ -6,6 +7,13 @@ import string
 import subprocess
 import threading
 from typing import Tuple
+
+
+def is_set(name: str) -> bool:
+  """Helper method to check if given property is set, anything except missing, 0 and false means set """
+
+  val = os.environ.get(name, '0').lower()
+  return not (val == '0' or val == 'false')
 
 
 def extract_ec2_metadata():
@@ -25,7 +33,7 @@ def extract_ec2_metadata():
         return {}
 
 
-def random_id(k=5):
+def random_id(k=3):
   """Random id to use for AWS identifiers."""
   #  https://stackoverflow.com/questions/2257441/random-string-generation-with-upper-case-letters-and-digits-in-python
   return ''.join(random.choices(string.ascii_lowercase + string.digits, k=k))
@@ -35,11 +43,16 @@ def log_environment():
     """Logs AWS local machine environment to wandb config."""
     import os
     import wandb
-    
+    import torch
+
+    if not (hasattr(wandb, 'config') and wandb.config is not None):
+        return
+
     for key in os.environ:
         if re.match(r"^NCCL|CUDA|PATH|^LD|USER|PWD|^OMP", key):
             wandb.config['env_'+key] = os.getenv(key)
 
+    wandb.config['pytorch_version'] = torch.__version__
     wandb.config.update(extract_ec2_metadata())
 
 

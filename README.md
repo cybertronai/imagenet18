@@ -7,6 +7,9 @@ Pre-requisites: Python 3.6 or higher
 
 ```
 pip install -r requirements.txt
+
+ncluster spot_prices p3                            # print prices and valid zones for p3 instances
+export NCLUSTER_ZONE=us-east-1                     # set to a zone with cheap p3's
 python tools/replicate_imagenet.py --replicas=16   # configure 16 high performance disks
 python train.py
 python tools/replicate_imagenet.py --replicas=16 --delete  # delete high performance disks

@@ -17,7 +17,9 @@ HOSTS_SLOTS_FN = 'hosts.slots'
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--name', type=str, default='imagenet',
-                    help="name of the current run, used for machine naming and tensorboard visualization")
+                    help="name of the current run, used for machine naming")
+parser.add_argument('--run_name', type=str, default='',
+                    help="name of run for loggin")
 parser.add_argument('--machines', type=int, default=1,
                     help="how many machines to use")
 parser.add_argument('--num_tasks', type=int, default=1,
@@ -28,7 +30,7 @@ parser.add_argument('--offset', type=int, default=0,
                     help='offset for imagenet ebs numbering')
 parser.add_argument('--vmtouch', type=int, default=0,
                     help="lock all examples into physical memory")
-parser.add_argument('--internal_config_fn', type=str, default='config_dict',
+parser.add_argument('--internal_config_fn', type=str, default='ncluster_config_dict',
                     help='location of filename with extra info to log')
 parser.add_argument('--nproc_per_node', type=int, default=8, help="Processes per machine, must not exceed number of GPUS")
 parser.add_argument('--image_name', type=str, default='pytorch-efa01',
@@ -38,14 +40,17 @@ parser.add_argument('--conda_env', type=str, default='pytorch_p36', help="name o
 parser.add_argument('--efa', type=int, default=0, help="use AWS EFA network")
 parser.add_argument('--pseudo_efa', type=int, default=0, help="use sockets interface when launching under EFA")
 parser.add_argument('--no_op', type=int, default=0, help='just print environment/debug info and skip rest')
-parser.add_argument('--skip_setup', action='store_true')
 parser.add_argument('--log_all_workers', type=int, default=0, help='log from each worker instead of just chief')
 parser.add_argument('--spot', action='store_true', help='use spot instead of regular instances')
 parser.add_argument('--cuda_debug', action='store_true', help='debug cuda errors')
 parser.add_argument('--pytorch_nightly', action='store_true', help='install nightly PyTorch')
+parser.add_argument('--pytorch_use_spawn', action='store_true', help='use spawn method in dataloaders')
 parser.add_argument('--simple_ring_setup', action='store_true', help='set 16 rings instead of manual ring order')
+parser.add_argument('--skip_setup', action='store_true', help='speed up relaunch by skipping some steps')
 args = parser.parse_args()
 args.num_tasks = args.machines
+if not args.run_name:
+    args.run_name = args.name
 
 # 109:12 to 93.00
 # https://app.wandb.ai/yaroslavvb/imagenet18/runs/gxsdo6i0
@@ -306,7 +311,7 @@ def main():
         assert args.simple_ring_setup, "must use --simple_ring_setup, otherwise NCCL_RINGS env var exceeds cmd-line limit"
         
     job = ncluster.make_job(name=args.name,
-                            run_name=f"{args.name}-{args.machines}",
+                            run_name=args.run_name,
                             num_tasks=args.machines,
                             image_name=args.image_name,
                             instance_type=args.instance_type,
@@ -316,7 +321,7 @@ def main():
                             )
 
     task0 = job.tasks[0]
-    logdir = task0.logdir  # workaround for race condition in creating logdir
+    _logdir = task0.logdir  # workaround for race condition in creating logdir
 
     config = {}
     for key in os.environ:
@@ -344,41 +349,53 @@ def main():
     config['logdir'] = job.logdir
 
     pickled_config = util.text_pickle(config)
-    job.tasks[0].write(args.internal_config_fn, pickled_config)
+    if args.log_all_workers:
+        job.write(args.internal_config_fn, pickled_config)
+    else:
+        job.tasks[0].write(args.internal_config_fn, pickled_config)
 
     if args.mount_imagenet:
         assert u.get_zone(), "Must specify zone when reusing EBS volumes"
         mount_imagenet(job)
 
-    job.run('rm -f *.py')  # remove files backed into imagenet18 release image
-    job.rsync('.')
-
-    if args.efa:
-        assert 'efa' in args.image_name  # make sure we use EFA-enabled image
-        job.run(f'{{ source activate {args.conda_env} ; }}  && {{ killall python || echo hi ; }} ')
-        hosts_str, hosts_file_str = util.setup_mpi(job, skip_ssh_setup=args.skip_setup)
-        task0.write(HOSTS_SLOTS_FN, hosts_file_str)
-
-    else:
+    if not args.skip_setup:
+        job.run('rm -f *.py')  # remove files backed into imagenet18 release image
+        job.run('conda init')  # missing .bashrc
         job.run(
             f'{{ source activate {args.conda_env} && bash setup.sh && pip install -U protobuf ; }}  && {{ killall python || echo hi ; }} ')
         if args.pytorch_nightly:
             job.run('conda install -y -c pytorch pytorch-nightly && bash setup.sh')
+    else:
+        job.run([f'source ~/.bashrc && conda activate {args.conda_env}', f'killall python || echo hi'])
+
+    job.rsync('.')
+
+    if args.efa:
+        assert 'efa' in args.image_name  # make sure we use EFA-enabled image
+        hosts_str, hosts_file_str = util.setup_mpi(job, skip_ssh_setup=args.skip_setup)
+        if not args.skip_setup:
+            task0.write(HOSTS_SLOTS_FN, hosts_file_str)
 
     env_params = get_nccl_params(args.machines, args.nproc_per_node)
     if args.cuda_debug:
         env_params += 'CUDA_LAUNCH_BLOCKING=1 NCCL_DEBUG=INFO '
     else:
-        env_params += 'NCCL_DEBUG=VERSION '
+        env_params += 'NCCL_DEBUG=INFO '
 
     env_params += " OMP_NUM_THREADS=1 "
+    if args.pytorch_use_spawn:
+        assert args.pytorch_nightly
+        env_params += " PYTORCH_USE_SPAWN=1 "
+    env_params += " NO_WANDB=1 "
+    if 'WANDB_API_KEY' in os.environ:
+        env_params += f" WANDB_API_KEY={os.environ.get('WANDB_API_KEY')} "
 
     # Training script args
     default_params = [
         datadir,
         '--fp16',
         '--logdir', job.logdir,
-        '--name', f'{args.name}-{util.random_id()}',
+        '--name', f'{args.run_name}-{util.random_id()}',
         '--distributed',
         '--init-bn0',
         '--no-bn-wd',
@@ -414,14 +431,19 @@ def main():
                                     FI_OFI_RXR_INLINE_MR_ENABLE=1,  # Enables inline memory registration of data buffers.
                                     NCCL_TREE_THRESHOLD=10 * 4294967296,  # force tree for everything under 40GB
                                     LD_LIBRARY_PATH=f'{CUDA_HOME}/lib:{CUDA_HOME}/lib64:{EFA_HOME}/lib64',
-                                    NCCL_DEBUG='INFO')
+                                    NCCL_DEBUG='INFO',
+                                    OMP_NUM_THREADS=1,
+                                    WANDB_API_KEY=os.environ.get('WANDB_API_KEY', ''),
+                                    PYTORCH_USE_SPAWN=args.pytorch_use_spawn,
+                                    NO_WANDB=args.pytorch_use_spawn,
+                                    )
         if args.no_op:
             worker_script_fn = 'training/env_test.py'
         else:
             worker_script_fn = 'training/train_imagenet_nv.py'
 
-        local_cmd = [f"{local_env} && source activate {args.conda_env} && ",
-                     f'python {worker_script_fn} {training_params} --local_rank="$LOCAL_RANK"']
+        local_cmd = [f"{local_env} && source ~/.bashrc && conda activate {args.conda_env} && ",
+                     f'python {worker_script_fn} {training_params} --local_rank=$OMPI_COMM_WORLD_LOCAL_RANK']
         local_cmd = ' '.join(local_cmd)
 
         cmd = [f"{MPI_HOME}/bin/mpirun -n {NUM_GPUS} -N {NPROC_PER_NODE} --hostfile {HOSTS_SLOTS_FN} ",

@@ -1,9 +1,17 @@
+import sys
+
 from tensorboardX import SummaryWriter
 import os
 import torch
 import time
 import wandb
-  
+
+# util is one level up, so import that
+module_path = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.abspath(f'{module_path}/..'))
+
+import util
+
 class TensorboardLogger:
   def __init__(self, output_dir, is_master=False):
     self.output_dir = output_dir
@@ -19,8 +27,10 @@ class TensorboardLogger:
     """Log value to tensorboard (relies on global_example_count being set properly)"""
     if not self.writer: return
     self.writer.add_scalar(tag, val, self.current_step)
-    if self.is_master:
+    try:
       wandb.log({tag: val}, step=int(self.current_step))
+    except:
+      pass
 
   def update_step_count(self, batch_total):
     self.current_step += batch_total
@@ -101,7 +111,10 @@ class FileLogger:
     return logger
 
   def console(self, *args):
-    self.logger.debug(*args)
+    if args and args[0]:
+      args0 = 'rank-'+os.environ.get('RANK', '0')+' '+str(args[0])
+    new_args = (args0,)+args[1:]
+    self.logger.debug(*new_args)
 
   def event(self, *args):
     self.logger.warn(*args)
