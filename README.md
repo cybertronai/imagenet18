@@ -66,7 +66,7 @@ The last number indicates that at epoch 21 the run got 67.462 top-1 test accurac
 
 ## Weights and Biases
 
-Runs will show up under under "imagenet18" project in your Weights and Biases page.
+Runs will show up under under "imagenet18" project in your Weights and Biases page, is https://app.wandb.ai/yaroslavvb/imagenet18/runs/8fv3xosq
 
 # Other notes
 If you run locally, you may need to download imagenet yourself from [here](https://s3.amazonaws.com/yaroslavvb2/data/imagenet18.tar)
