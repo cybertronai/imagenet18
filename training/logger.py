@@ -1,16 +1,14 @@
+import os
 import sys
 
-from tensorboardX import SummaryWriter
-import os
 import torch
-import time
 import wandb
+from tensorboardX import SummaryWriter
 
 # util is one level up, so import that
 module_path = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.abspath(f'{module_path}/..'))
 
-import util
 
 class TensorboardLogger:
   def __init__(self, output_dir, is_master=False):

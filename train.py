@@ -54,8 +54,6 @@ if not args.run_name:
 
 # 109:12 to 93.00
 # https://app.wandb.ai/yaroslavvb/imagenet18/runs/gxsdo6i0
-# events: https://s3.amazonaws.com/yaroslavvb/logs/imagenet-1
-# logs: https://s3.amazonaws.com/yaroslavvb/logs/imagenet1.tar
 lr = 1.0
 scale_224 = 224 / 512
 scale_288 = 128 / 512
@@ -94,8 +92,6 @@ two_machines = [
 
 # 29:44 to 93.05
 # events: https://s3.amazonaws.com/yaroslavvb/logs/imagenet-4
-# logs: https://s3.amazonaws.com/yaroslavvb/logs/imagenet-4.tar
-
 # p3dn: https://app.wandb.ai/yaroslavvb/imagenet18/runs/pp0g9k5c
 lr = 0.50 * 4  # 4 = num tasks
 bs = [256, 224,
@@ -117,8 +113,6 @@ four_machines = [
 ]
 
 # 19:04 to 93.0
-# events: https://s3.amazonaws.com/yaroslavvb/logs/imagenet-16.02.8
-# logs: https://s3.amazonaws.com/yaroslavvb/logs/imagenet-8.tar 
 lr = 0.235 * 8
 scale_224 = 224 / 128
 eight_machines = [
@@ -137,8 +131,6 @@ eight_machines = [
 ]
 
 # 16:08 to 93.04 (after prewarming)
-# events: https://s3.amazonaws.com/yaroslavvb/logs/imagenet-16.02.thu16
-# logs: https://s3.amazonaws.com/yaroslavvb/logs/logs/imagenet-16.cmd.tar
 lr = 0.235 * 8  #
 bs = 64
 sixteen_machines = [
@@ -386,7 +378,6 @@ def main():
     if args.pytorch_use_spawn:
         assert args.pytorch_nightly
         env_params += " PYTORCH_USE_SPAWN=1 "
-    env_params += " NO_WANDB=1 "
     if 'WANDB_API_KEY' in os.environ:
         env_params += f" WANDB_API_KEY={os.environ.get('WANDB_API_KEY')} "
 

@@ -8,17 +8,18 @@ Pre-requisites: Python 3.6 or higher
 ```
 pip install -r requirements.txt
 
-ncluster spot_prices p3                            # print prices and valid zones for p3 instances
+ncluster spot_prices p3                            # check spot prices for regions to find valid zone for p3 instances
 export NCLUSTER_ZONE=us-east-1                     # set to a zone with cheap p3's
-python tools/replicate_imagenet.py --replicas=16   # configure 16 high performance disks
-python train.py
-python tools/replicate_imagenet.py --replicas=16 --delete  # delete high performance disks
+python tools/replicate_imagenet.py --replicas=4   # configure 16 high performance disks
+python train.py --machines=4
+python tools/replicate_imagenet.py --replicas=4 --delete  # delete high performance disks
 ```
 
 To run with smaller number of machines:
 
 ```
 python train.py --machines=1
+python train.py --machines=2
 python train.py --machines=4
 python train.py --machines=8
 python train.py --machines=16
@@ -31,11 +32,11 @@ Your AWS account needs to have high enough limit in order to reserve this number
 
 # Checking progress
 
-Machines print progress to local stdout, log TensorBoard event files to EFS under unique directory and also send data to wandb if WANDB_API_KEY env var is set (it's under https://app.wandb.ai/settings).
+Machines print progress to local stdout, log TensorBoard event files to EFS under unique directory and also send data to wandb if WANDB_API_KEY env var is set to API key (it's under https://app.wandb.ai/settings).
 
 
 ## TensorBoard
-1. launch tensorboard using tools/launch_tensorboard.py
+1. launch tensorboard using `python tools/launch_tensorboard.py`
 
 That will provide a link to tensorboard instance which has loss graph under "losses" group. You'll see something like this under "Losses" tab
 <img src='https://raw.githubusercontent.com/diux-dev/imagenet18/master/tensorboard.png'>
