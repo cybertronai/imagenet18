@@ -62,6 +62,7 @@ def get_parser():
     parser.add_argument('--dist-url', default='env://', type=str,
                         help='url used to set up distributed training')
     parser.add_argument('--dist-backend', default='nccl', type=str, help='distributed backend')
+    parser.add_argument('--synthetic-data', action='store_true', help='Use synthetic training data')
     parser.add_argument('--local_rank', default=0, type=int,
                         help='Used for multi-process training. Can either be manually set ' +
                              'or automatically set by using \'python -m multiproc\'.')
@@ -410,7 +411,7 @@ class DataManager():
         else:
             val_bs = max(bs, 128)
         return dataloader.get_loaders(trndir, valdir, bs=bs, val_bs=val_bs, sz=sz, workers=args.workers,
-                                      distributed=args.distributed, **kwargs)
+                                      distributed=args.distributed, synthetic=args.synthetic_data, **kwargs)
 
 
 # ### Learning rate scheduler
